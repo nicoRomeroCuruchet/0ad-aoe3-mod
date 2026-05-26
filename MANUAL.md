@@ -181,11 +181,89 @@ aoe3/
 
 ## Restoring on a Fresh Machine
 
-1. Install 0 A.D. (follow steps 1-8 above, or install from package manager: `sudo apt install 0ad`)
+### Simple case: just want the mod
+
+1. Install 0 A.D. (follow steps 1-8 above, or `sudo apt install 0ad`)
 2. Clone this mod into the 0 A.D. mods directory:
    ```bash
-   git clone <repo-url> /path/to/0ad/binaries/data/mods/aoe3
+   git clone git@github.com:nicoRomeroCuruchet/0ad-aoe3-mod.git \
+     ~/Documents/0ad/binaries/data/mods/aoe3
    ```
 3. Launch with `-mod=mod -mod=public -mod=aoe3` or activate in the menu.
 
 No other files need to be modified outside the mod — everything is self-contained.
+
+---
+
+## Full OS Migration
+
+When changing operating systems or moving to a new machine, the only things that aren't already in git are:
+
+- **Claude Code memory** (~/.claude/projects/-home-nromero-Documents-0ad/) — project context and notes
+- **Any loose files** in the 0 A.D. repo root that you want to keep (screenshots, etc.)
+
+### Before migration: create the backup
+
+```bash
+# Make sure the mod is pushed to GitHub first
+cd ~/Documents/0ad/binaries/data/mods/aoe3
+git push
+
+# Create migration backup with Claude memory + any loose files
+mkdir -p /tmp/0ad-backup
+cp -r ~/.claude/projects/-home-nromero-Documents-0ad /tmp/0ad-backup/claude-project
+cp ~/Documents/0ad/image_2.jpg /tmp/0ad-backup/ 2>/dev/null || true
+cd /tmp && tar czf ~/0ad-migration-backup.tar.gz 0ad-backup/
+rm -rf /tmp/0ad-backup
+
+# Save the tarball somewhere safe (USB, cloud, another machine)
+ls -lh ~/0ad-migration-backup.tar.gz
+```
+
+### After migration: restore on the new machine
+
+**Step 1 — Install 0 A.D. from source:**
+```bash
+git clone https://github.com/0ad/0ad.git ~/Documents/0ad
+# Then follow sections 1-8 of this MANUAL
+```
+
+**Step 2 — Clone the mod:**
+```bash
+git clone git@github.com:nicoRomeroCuruchet/0ad-aoe3-mod.git \
+  ~/Documents/0ad/binaries/data/mods/aoe3
+```
+
+**Step 3 — Restore the backup:**
+```bash
+cd ~ && tar xzf 0ad-migration-backup.tar.gz
+
+# Restore Claude Code memory
+mkdir -p ~/.claude/projects/
+mv ~/0ad-backup/claude-project ~/.claude/projects/-home-nromero-Documents-0ad
+
+# Restore loose files (if any)
+mv ~/0ad-backup/image_2.jpg ~/Documents/0ad/ 2>/dev/null || true
+
+# Cleanup
+rm -rf ~/0ad-backup
+```
+
+**Step 4 — Compile and run:**
+```bash
+cd ~/Documents/0ad
+./libraries/build-source-libs.sh -j$(nproc)
+./build/workspaces/update-workspaces.sh
+make -C build/workspaces/gcc/ -j$(nproc) config=release
+./binaries/system/pyrogenesis -mod=mod -mod=public -mod=aoe3
+```
+
+### What's preserved by git (no backup needed)
+
+| Asset | Source |
+|-------|--------|
+| 0 A.D. game source | `github.com/0ad/0ad` |
+| This mod (all code, civs, mechanics) | `github.com/nicoRomeroCuruchet/0ad-aoe3-mod` |
+| Setup instructions | This file (inside the mod) |
+| Game binaries | Recompiled from source |
+| Vanilla fonts | Git LFS (`git lfs pull` re-downloads them) |
