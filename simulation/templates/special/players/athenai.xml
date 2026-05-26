@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Entity parent="template_player">
+  <Identity>
+    <Civ>athenai</Civ>
+    <GenericName>Athenians</GenericName>
+    <History>Athens, the cradle of democracy, led the Greek world through its Golden Age with unmatched naval power, philosophy, and civic institutions.</History>
+    <Icon>emblems/emblem_athenians.png</Icon>
+  </Identity>
+  <Player>
+    <Formations datatype="tokens"/>
+  </Player>
+</Entity>

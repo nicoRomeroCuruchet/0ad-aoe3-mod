@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Toxotai: Scythian-style psiloi archer. Area suppression unit.
+     Cheapest ranged unit, long range, fast fire rate, low per-arrow damage.
+     Arrows apply "Suppressed" status: -15% move speed, -10% attack speed.
+     Strong vs light infantry (2x bonus). Useless vs heavy armor. Dies in melee. -->
+<Entity parent="template_unit_infantry_ranged_archer">
+  <Identity>
+    <Civ>athenai</Civ>
+    <GenericName>Archer</GenericName>
+    <SpecificName>Toxotes</SpecificName>
+    <Tooltip>Psiloi bowman. Long range, fast fire rate, arrows suppress enemies (-15% speed, -10% attack). Strong vs light infantry. No armor — dies in melee.</Tooltip>
+    <VisibleClasses datatype="tokens">Archer Infantry</VisibleClasses>
+    <Icon>units/hele/infantry_archer.png</Icon>
+  </Identity>
+  <Cost>
+    <BuildTime>10</BuildTime>
+    <Resources>
+      <food>30</food>
+      <wood>25</wood>
+    </Resources>
+  </Cost>
+  <Health>
+    <Max>65</Max>
+  </Health>
+  <Attack>
+    <Ranged>
+      <Damage>
+        <Pierce>8</Pierce>
+      </Damage>
+      <MaxRange>60</MaxRange>
+      <PrepareTime>700</PrepareTime>
+      <RepeatTime>1200</RepeatTime>
+      <Bonuses>
+        <BonusArcher>
+          <Classes>Archer</Classes>
+          <Multiplier>2.0</Multiplier>
+        </BonusArcher>
+        <BonusSlinger>
+          <Classes>Slinger</Classes>
+          <Multiplier>2.0</Multiplier>
+        </BonusSlinger>
+        <BonusJavelineer>
+          <Classes>Javelineer</Classes>
+          <Multiplier>2.0</Multiplier>
+        </BonusJavelineer>
+      </Bonuses>
+      <ApplyStatus>
+        <Suppressed>
+          <Duration>3000</Duration>
+          <Stackability>Replace</Stackability>
+          <Modifiers>
+            <SlowMove>
+              <Paths datatype="tokens">UnitMotion/WalkSpeed</Paths>
+              <Affects datatype="tokens">Unit</Affects>
+              <Multiply>0.85</Multiply>
+            </SlowMove>
+            <SlowAttack>
+              <Paths datatype="tokens">Attack/Ranged/RepeatTime Attack/Melee/RepeatTime</Paths>
+              <Affects datatype="tokens">Unit</Affects>
+              <Multiply>1.11</Multiply>
+            </SlowAttack>
+          </Modifiers>
+        </Suppressed>
+      </ApplyStatus>
+    </Ranged>
+  </Attack>
+  <Resistance>
+    <Entity>
+      <Damage>
+        <Hack>0</Hack>
+        <Pierce>1</Pierce>
+        <Crush>0</Crush>
+      </Damage>
+    </Entity>
+  </Resistance>
+  <UnitMotion>
+    <WalkSpeed>11.0</WalkSpeed>
+  </UnitMotion>
+  <Promotion disable=""/>
+  <VisualActor>
+    <Actor>units/athenai/infantry_archer.xml</Actor>
+  </VisualActor>
+</Entity>

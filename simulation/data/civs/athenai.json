@@ -1,0 +1,65 @@
+{
+	"Code": "athenai",
+	"Culture": "athenai",
+	"Name": "Athenians",
+	"Emblem": "session/portraits/emblems/emblem_athenians.png",
+	"History": "Athens, the cradle of democracy and philosophy, rose to become the dominant naval and cultural power of the Greek world during the Golden Age (490-323 BC). Under leaders like Pericles, the city built the Parthenon, fostered the arts, and led the Delian League against Persian aggression.",
+	"Music": [
+		{ "File": "Harvest_Festival.ogg", "Type": "peace" }
+	],
+	"CivBonuses": [
+		{
+			"Name": "Civic Duty",
+			"History": "Athenian citizens were expected to serve the polis as soldiers, jurors, and laborers alike.",
+			"Description": "Villagers gather resources 10% faster."
+		}
+	],
+	"WallSets": [
+		"structures/wallset_palisade"
+	],
+	"StartEntities": [
+		{
+			"Template": "structures/athenai/civil_centre"
+		},
+		{
+			"Template": "units/athenai/polites",
+			"Count": 5
+		},
+		{
+			"Template": "units/athenai/hero_pericles",
+			"Count": 1
+		},
+		{
+			"Template": "structures/athenai/barracks"
+		},
+		{
+			"Template": "units/athenai/infantry_hoplite",
+			"Count": 10
+		},
+		{
+			"Template": "units/athenai/infantry_peltast",
+			"Count": 6
+		},
+		{
+			"Template": "units/athenai/infantry_archer",
+			"Count": 4
+		},
+		{
+			"Template": "units/athenai/infantry_slinger",
+			"Count": 3
+		}
+	],
+	"AINames": [
+		"Pericles", "Themistocles", "Cleisthenes", "Miltiades", "Cimon", "Aristides", "Ephialtes", "Nicias"
+	],
+	"Factions": [
+		{
+			"Name": "Athenians",
+			"Description": "The democratic city-state of Athens, cultural and naval power of the Classical Greek world."
+		}
+	],
+	"SkirmishReplacements": {
+		"skirmish/units/default_infantry_ranged_b": "units/athenai/polites"
+	},
+	"SelectableInGameSetup": true
+}

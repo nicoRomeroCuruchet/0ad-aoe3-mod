@@ -1,0 +1,20 @@
+{
+	"type": "range",
+	"radius": 30,
+	"affects": ["Infantry"],
+	"modifications": [
+		{ "value": "Attack/Melee/Damage/Hack", "multiply": 1.10 },
+		{ "value": "Attack/Melee/Damage/Pierce", "multiply": 1.10 },
+		{ "value": "Attack/Melee/Damage/Crush", "multiply": 1.10 },
+		{ "value": "UnitMotion/WalkSpeed", "multiply": 1.10 }
+	],
+	"auraName": "Courage of Pericles",
+	"auraDescription": "Nearby infantry deals 10% more damage and moves 10% faster.",
+	"overlayIcon": "art/textures/ui/session/auras/attack_bonus.png",
+	"rangeOverlay": {
+		"lineTexture": "outline_border_02.png",
+		"lineTextureMask": "outline_border_02_mask.png",
+		"lineThickness": 0.15
+	},
+	"stackable": false
+}

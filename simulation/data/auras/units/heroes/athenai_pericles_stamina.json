@@ -1,0 +1,18 @@
+{
+	"type": "range",
+	"radius": 30,
+	"affects": ["Worker"],
+	"modifications": [
+		{ "value": "Stamina/DrainPerSecond", "multiply": 0.70 },
+		{ "value": "Stamina/RegenPerSecond", "multiply": 1.30 }
+	],
+	"auraName": "Endurance of Pericles",
+	"auraDescription": "Nearby villagers drain 30% less stamina and regenerate 30% faster.",
+	"overlayIcon": "art/textures/ui/session/auras/speed_bonus.png",
+	"rangeOverlay": {
+		"lineTexture": "outline_border_02.png",
+		"lineTextureMask": "outline_border_02_mask.png",
+		"lineThickness": 0.15
+	},
+	"stackable": false
+}

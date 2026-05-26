@@ -1,0 +1,17 @@
+{
+	"type": "range",
+	"radius": 15,
+	"affects": ["Human"],
+	"modifications": [
+		{ "value": "Health/RegenRate", "add": 1.0 }
+	],
+	"auraName": "Pericles' Remedy",
+	"auraDescription": "Humans close to Pericles +1.0 health regeneration rate.",
+	"overlayIcon": "art/textures/ui/session/auras/heal.png",
+	"rangeOverlay": {
+		"lineTexture": "outline_border_02.png",
+		"lineTextureMask": "outline_border_02_mask.png",
+		"lineThickness": 0.15
+	},
+	"stackable": false
+}

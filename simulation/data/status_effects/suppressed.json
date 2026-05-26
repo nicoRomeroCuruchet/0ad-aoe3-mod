@@ -1,0 +1,7 @@
+{
+	"applierTooltip": "Arrows suppress the target, reducing movement and attack speed.",
+	"code": "Suppressed",
+	"icon": "default",
+	"statusName": "Suppressed",
+	"receiverTooltip": "This unit is suppressed by arrow fire: -15% movement speed, -10% attack speed."
+}

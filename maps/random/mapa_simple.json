@@ -1,0 +1,10 @@
+{
+	"settings": {
+		"Name": "Mapa Simple AOE3",
+		"Script": "mapa_simple.js",
+		"Description": "Mapa de prueba con oro, madera, piedra y alimento.",
+		"Preview": "alpine_valley.png",
+		"CircularMap": true,
+		"SupportedBiomes": "generic/temperate"
+	}
+}

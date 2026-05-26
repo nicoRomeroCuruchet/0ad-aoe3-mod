@@ -1,0 +1,7 @@
+{
+	"applierTooltip": "Lead bullets crack enemy armor, reducing their resistance.",
+	"code": "Cracked",
+	"icon": "default",
+	"statusName": "Cracked",
+	"receiverTooltip": "This unit's armor is cracked: -30% Hack and Pierce resistance."
+}

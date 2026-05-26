@@ -1,0 +1,8 @@
+{
+	"genericName": "Golden Age",
+	"specificName": {
+		"athenai": "Chrysoun Aion"
+	},
+	"autoResearch": true,
+	"icon": "village_phase.png"
+}

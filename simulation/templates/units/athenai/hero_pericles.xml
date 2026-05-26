@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Entity parent="template_unit_champion_infantry">
+  <Identity>
+    <Civ>athenai</Civ>
+    <GenericName>Athenian Strategos</GenericName>
+    <SpecificName>Pericles</SpecificName>
+    <Icon>units/athen/hero_hippocrates.png</Icon>
+  </Identity>
+  <Auras datatype="tokens">
+    units/heroes/athenai_pericles_heal_inner
+    units/heroes/athenai_pericles_heal
+    units/heroes/athenai_pericles_gather_inner
+    units/heroes/athenai_pericles_stamina_inner
+    units/heroes/athenai_pericles_combat_inner
+    units/heroes/athenai_pericles_gather
+    units/heroes/athenai_pericles_stamina
+    units/heroes/athenai_pericles_combat
+  </Auras>
+  <Health>
+    <Max>500</Max>
+  </Health>
+  <Cost>
+    <BuildTime>40</BuildTime>
+    <Resources>
+      <food>200</food>
+      <metal>100</metal>
+    </Resources>
+  </Cost>
+  <VisualActor>
+    <Actor>units/athenians/hero_healer_hippocrates.xml</Actor>
+  </VisualActor>
+</Entity>

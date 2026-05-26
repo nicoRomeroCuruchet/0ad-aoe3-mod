@@ -1,0 +1,18 @@
+{
+	"type": "range",
+	"radius": 15,
+	"affects": ["Worker"],
+	"modifications": [
+		{ "value": "Stamina/DrainPerSecond", "multiply": 0.80 },
+		{ "value": "Stamina/RegenPerSecond", "multiply": 1.20 }
+	],
+	"auraName": "Vigor of Pericles",
+	"auraDescription": "Very close villagers drain 20% less stamina and regenerate 20% faster.",
+	"overlayIcon": "art/textures/ui/session/auras/speed_bonus.png",
+	"rangeOverlay": {
+		"lineTexture": "heal_overlay_range.png",
+		"lineTextureMask": "heal_overlay_range_mask.png",
+		"lineThickness": 0.35
+	},
+	"stackable": false
+}

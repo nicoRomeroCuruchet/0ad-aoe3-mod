@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sfendonitai: Psiloi slinger. Kinetic penetration specialist.
+     Lead sling bullets deal Pierce + Crush damage, bypassing Pierce armor.
+     On hit applies "Cracked" status: -30% Hack/Pierce resistance for 4s.
+     Strong vs heavy infantry and siege. Weak vs cavalry. Higher spread than archers. -->
+<Entity parent="template_unit_infantry_ranged_slinger">
+  <Identity>
+    <Civ>athenai</Civ>
+    <GenericName>Slinger</GenericName>
+    <SpecificName>Sfendonetes</SpecificName>
+    <Tooltip>Psiloi slinger. Lead bullets crack enemy armor (-30% Hack/Pierce resistance for 4s). Strong vs heavy infantry and siege. No armor, very fragile.</Tooltip>
+    <VisibleClasses datatype="tokens">Slinger Infantry</VisibleClasses>
+    <Icon>units/athen/infantry_slinger.png</Icon>
+  </Identity>
+  <Cost>
+    <BuildTime>10</BuildTime>
+    <Resources>
+      <food>30</food>
+      <stone>20</stone>
+    </Resources>
+  </Cost>
+  <Health>
+    <Max>65</Max>
+  </Health>
+  <Attack>
+    <Ranged>
+      <Damage>
+        <Pierce>12</Pierce>
+        <Crush>5</Crush>
+      </Damage>
+      <MaxRange>45</MaxRange>
+      <PrepareTime>400</PrepareTime>
+      <RepeatTime>1400</RepeatTime>
+      <Projectile>
+        <Speed>80</Speed>
+        <Spread>3.5</Spread>
+        <Gravity>35</Gravity>
+        <FriendlyFire>false</FriendlyFire>
+        <LaunchPoint y="2.5"/>
+      </Projectile>
+      <Bonuses>
+        <BonusSpearman>
+          <Classes>Spearman</Classes>
+          <Multiplier>1.5</Multiplier>
+        </BonusSpearman>
+        <BonusSiege>
+          <Classes>Siege</Classes>
+          <Multiplier>1.5</Multiplier>
+        </BonusSiege>
+      </Bonuses>
+      <ApplyStatus>
+        <Cracked>
+          <Duration>4000</Duration>
+          <Stackability>Replace</Stackability>
+          <Modifiers>
+            <CrackHack>
+              <Paths datatype="tokens">Resistance/Entity/Damage/Hack</Paths>
+              <Affects datatype="tokens">Unit</Affects>
+              <Multiply>0.7</Multiply>
+            </CrackHack>
+            <CrackPierce>
+              <Paths datatype="tokens">Resistance/Entity/Damage/Pierce</Paths>
+              <Affects datatype="tokens">Unit</Affects>
+              <Multiply>0.7</Multiply>
+            </CrackPierce>
+          </Modifiers>
+        </Cracked>
+      </ApplyStatus>
+    </Ranged>
+  </Attack>
+  <Resistance>
+    <Entity>
+      <Damage>
+        <Hack>0</Hack>
+        <Pierce>1</Pierce>
+        <Crush>0</Crush>
+      </Damage>
+    </Entity>
+  </Resistance>
+  <UnitMotion>
+    <WalkSpeed>11.0</WalkSpeed>
+  </UnitMotion>
+  <Promotion disable=""/>
+  <VisualActor>
+    <Actor>units/athenai/infantry_slinger.xml</Actor>
+  </VisualActor>
+</Entity>

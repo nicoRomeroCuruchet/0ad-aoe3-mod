@@ -1,0 +1,19 @@
+# OS-specific
+.DS_Store
+Thumbs.db
+
+# Editor / IDE
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Cache and temp
+*.cache
+*.tmp
+*.bak
+*.log
+
+# Engine cache (if any drops here)
+cache/

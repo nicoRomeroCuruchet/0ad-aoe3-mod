@@ -1,0 +1,7 @@
+{
+	"name": "aoe3",
+	"version": "0.1.0",
+	"label": "AOE3 Mod",
+	"description": "Recreando mecanicas de AOE3",
+	"dependencies": ["0ad"]
+}

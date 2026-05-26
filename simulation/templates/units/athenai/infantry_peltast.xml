@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Peltast: Light skirmisher armed with javelins and a crescent pelta shield.
+     Fast, fragile ranged harasser — excels at kiting and softening targets. -->
+<Entity parent="template_unit_infantry_ranged_javelineer">
+  <Identity>
+    <Civ>athenai</Civ>
+    <GenericName>Peltast</GenericName>
+    <SpecificName>Peltastes</SpecificName>
+    <Tooltip>Light skirmisher with javelins and pelta shield. Fast but fragile. Good Pierce defense, weak to melee.</Tooltip>
+    <VisibleClasses datatype="tokens">Javelineer Infantry</VisibleClasses>
+    <Icon>units/athen/infantry_javelinist.png</Icon>
+  </Identity>
+  <Cost>
+    <BuildTime>12</BuildTime>
+    <Resources>
+      <food>40</food>
+      <wood>30</wood>
+    </Resources>
+  </Cost>
+  <Health>
+    <Max>85</Max>
+  </Health>
+  <Attack>
+    <Ranged>
+      <Damage>
+        <Pierce>18</Pierce>
+      </Damage>
+      <MaxRange>30</MaxRange>
+      <PrepareTime>350</PrepareTime>
+      <RepeatTime>1400</RepeatTime>
+    </Ranged>
+  </Attack>
+  <Resistance>
+    <Entity>
+      <Damage>
+        <Hack>1</Hack>
+        <Pierce>4</Pierce>
+        <Crush>0</Crush>
+      </Damage>
+    </Entity>
+  </Resistance>
+  <UnitMotion>
+    <WalkSpeed>11.5</WalkSpeed>
+  </UnitMotion>
+  <Promotion disable=""/>
+  <VisualActor>
+    <Actor>units/athenai/infantry_peltast.xml</Actor>
+  </VisualActor>
+</Entity>

@@ -1,0 +1,29 @@
+{
+	"genericName": "Peloponnesian Age",
+	"specificName": {
+		"athenai": "Peloponnesiakon Polemon"
+	},
+	"description": "Athens enters the era of total war. The Peloponnesian conflict demands fortifications, cavalry, and new military doctrines. Unlocks cavalry, defensive structures, and advanced infantry.",
+	"cost": {
+		"food": 500,
+		"wood": 500
+	},
+	"requirements": {
+		"entity": {
+			"class": "Village",
+			"number": 5
+		}
+	},
+	"requirementsTooltip": "Requires five Golden Age structures.",
+	"supersedes": "phase_village",
+	"replaces": ["phase_town"],
+	"icon": "town_phase.png",
+	"researchTime": 40,
+	"tooltip": "Advance to the Peloponnesian Age. Unlocks cavalry, defensive structures, and advanced military technologies. Agora +25% territory radius. Structures +20% arrow damage.",
+	"modifications": [
+		{ "value": "Capturable/GarrisonRegenRate", "add": 0.5, "affects": "Structure" },
+		{ "value": "Attack/Ranged/Damage/Pierce", "multiply": 1.2, "affects": "Structure" },
+		{ "value": "TerritoryInfluence/Radius", "multiply": 1.25, "affects": "CivCentre" }
+	],
+	"soundComplete": "interface/alarm/alarm_phase.xml"
+}

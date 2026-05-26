@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Inherits from the base 0ad civilian template -->
+<Entity parent="template_unit_support_civilian">
+
+  <Identity>
+    <GenericName>Villager</GenericName>
+    <SpecificName>Villager</SpecificName>
+    <Icon>units/athen/support_civilian.png</Icon>
+  </Identity>
+
+  <Cost>
+    <BuildTime>25</BuildTime>
+    <Resources>
+      <food>50</food>
+    </Resources>
+  </Cost>
+
+  <Health>
+    <Max>40</Max>
+  </Health>
+
+  <!-- Can gather all 4 resource types -->
+  <ResourceGatherer>
+    <MaxDistance>2.0</MaxDistance>
+    <BaseSpeed>1.0</BaseSpeed>
+    <Rates>
+      <food.fruit>1.0</food.fruit>
+      <food.grain>0.8</food.grain>
+      <food.meat>1.0</food.meat>
+      <wood.tree>0.8</wood.tree>
+      <stone.rock>0.5</stone.rock>
+      <metal.ore>0.5</metal.ore>
+    </Rates>
+    <Capacities>
+      <food>20</food>
+      <wood>20</wood>
+      <stone>20</stone>
+      <metal>20</metal>
+    </Capacities>
+  </ResourceGatherer>
+
+  <!-- Stamina: sprints fast initially, tires out, recovers when idle. -->
+  <Stamina>
+    <Max>100</Max>
+    <DrainPerSecond>12</DrainPerSecond>
+    <RegenPerSecond>8</RegenPerSecond>
+    <SprintMultiplier>1.5</SprintMultiplier>
+    <ExhaustedMultiplier>0.6</ExhaustedMultiplier>
+    <ExhaustedThreshold>20</ExhaustedThreshold>
+  </Stamina>
+
+  <!-- Uses the existing Athenian female citizen visual model -->
+  <VisualActor>
+    <Actor>units/athenians/citizen_female.xml</Actor>
+  </VisualActor>
+
+</Entity>

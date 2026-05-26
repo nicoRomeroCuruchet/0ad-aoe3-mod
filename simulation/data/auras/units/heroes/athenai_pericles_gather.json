@@ -1,0 +1,17 @@
+{
+	"type": "range",
+	"radius": 30,
+	"affects": ["Worker"],
+	"modifications": [
+		{ "value": "ResourceGatherer/BaseSpeed", "multiply": 1.20 }
+	],
+	"auraName": "Wisdom of Pericles",
+	"auraDescription": "Nearby villagers gather 20% faster.",
+	"overlayIcon": "art/textures/ui/session/auras/buildgather_bonus.png",
+	"rangeOverlay": {
+		"lineTexture": "outline_border_02.png",
+		"lineTextureMask": "outline_border_02_mask.png",
+		"lineThickness": 0.15
+	},
+	"stackable": false
+}

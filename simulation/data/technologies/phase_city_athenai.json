@@ -1,0 +1,29 @@
+{
+	"genericName": "Macedonian Age",
+	"specificName": {
+		"athenai": "Makedonikon Aion"
+	},
+	"description": "The Macedonian military revolution transforms warfare. Pike phalanxes, companion cavalry, and siege engines bring overwhelming force to the battlefield.",
+	"cost": {
+		"stone": 750,
+		"metal": 750
+	},
+	"requirements": {
+		"entity": {
+			"class": "Town",
+			"number": 3
+		}
+	},
+	"requirementsTooltip": "Requires three Peloponnesian Age structures.",
+	"supersedes": "phase_town_athenai",
+	"replaces": ["phase_city"],
+	"icon": "city_phase.png",
+	"researchTime": 60,
+	"tooltip": "Advance to the Macedonian Age. Unlocks pike phalanx, elite infantry, siege engines, and companion cavalry. Agora +25% territory radius. Structures +20% arrow damage.",
+	"modifications": [
+		{ "value": "Capturable/GarrisonRegenRate", "add": 1, "affects": "Structure" },
+		{ "value": "Attack/Ranged/Damage/Pierce", "multiply": 1.2, "affects": "Structure" },
+		{ "value": "TerritoryInfluence/Radius", "multiply": 1.25, "affects": "CivCentre" }
+	],
+	"soundComplete": "interface/alarm/alarm_phase.xml"
+}
