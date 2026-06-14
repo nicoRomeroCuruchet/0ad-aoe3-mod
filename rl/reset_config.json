@@ -4,6 +4,7 @@
     "gameSpeed": 1,
     "settings": {
         "Name": "RL Gather",
+        "mapName": "RL Gather",
         "mapType": "random",
         "Script": "rl_gather.js",
         "Seed": 0,
