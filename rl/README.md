@@ -131,3 +131,44 @@ El mapa determinista (1 Polites + 1 árbol) está en `maps/random/rl_gather.{js,
   - El agente debe **aprender a explorar** (mucho más caro de entrenar; probablemente requiera
     recurrencia/memoria o curiosidad/intrinsic reward).
   - Es un problema cualitativamente distinto a M0–M2 (búsqueda, no navegación a objetivo conocido).
+
+## Para alumnos / por dónde empezar
+
+**La parte difícil ya está hecha: la infraestructura para entrenar.** Conectar el motor de 0 A.D.,
+un entorno tipo Gym estable, lanzar el server headless de forma confiable, el mapa y la config —
+todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentran en el RL.
+
+### Lo que heredan ya armado
+
+| Ya hecho (no lo toquen, reúsenlo) | Dónde |
+|---|---|
+| Lanzar 0 A.D. headless de forma confiable | `run_server.sh` |
+| Entorno Gym (`reset`/`step`/obs/acción) | `gather/env.py` (lo **extienden**, no lo reescriben) |
+| Loop de entrenamiento + evaluación | `train.py`, `eval.py` |
+| Conexión al motor y acciones (`walk`/`gather`/…) | cliente `zero_ad` |
+| Mapa/escenario parametrizable | `maps/random/rl_gather.js` |
+| Funciones puras testeadas (geometría, obs, reward) | `gather/core.py` + `tests/` |
+
+### Orden sugerido (rampa de dificultad)
+
+1. **Arrancá corriendo lo que ya está** (sección "Cómo correr todo"): mirá al agente de M0 ir al recurso.
+2. **M1** — cambiá el reward a Δstock real (que junte, no que se acerque). Tractable, reusa todo.
+3. **M2** — escalá a 4 aldeanos + varios recursos (acción `Box(8,)`). Sigue con posiciones conocidas.
+4. **M3+ (capstone)** — exploración con niebla de guerra. Ambicioso; encaralo al final.
+
+### Dónde meter mano (enganches concretos)
+
+- **Reward:** `gather_reward()` en `gather/core.py` (y leer el stock con `game.evaluate(...)` desde `env.py`).
+- **Observación:** `build_observation()` en `gather/core.py` + `_positions()` en `env.py`.
+- **Acción / nº de aldeanos:** `action_space` y `step()` en `gather/env.py`.
+- **Escenario (recursos, tamaño, niebla):** `maps/random/rl_gather.js` + `reset_config.json`.
+- **Algoritmo / hiperparámetros:** `train.py` (hoy `SAC("MlpPolicy", ...)`).
+
+### Dos advertencias honestas
+
+1. **Cierren primero la resiliencia del `env`** (la tarea-prep de M1: reintentar/relanzar el server
+   ante desconexiones). Hoy el server se cae solo y los entrenamientos largos se cortan — y RL
+   necesita MUCHAS muestras. Es la única pieza de infra que falta y la van a agradecer.
+2. **La exploración (M3+) es mucho más difícil de entrenar** que M0–M2 (reward esparso, hay que
+   aprender a explorar; quizás política con memoria/recurrencia, ej. `RecurrentPPO` de `sb3-contrib`).
+   No la encaren como primer proyecto: hagan M1/M2 de calentamiento.
