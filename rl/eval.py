@@ -2,24 +2,32 @@ import argparse
 import numpy as np
 from stable_baselines3 import SAC
 from rl.gather import ZeroADGatherEnv
+from rl.gather.core import denormalize_action
 
 
-def run_episode(env, model, deterministic):
+def run_episode(env, model, deterministic, verbose=False):
     obs, _ = env.reset()
-    total, done = 0.0, False
+    total, done, step = 0.0, False, 0
     info = {}
     while not done:
         action, _ = model.predict(obs, deterministic=deterministic)
         obs, r, term, trunc, info = env.step(action)
         total += r
         done = term or trunc
+        if verbose:
+            tx, tz = denormalize_action(action, env.map_size_m)
+            print("    step %2d: target=(%.0f,%.0f) dist=%.1f reward=%+.2f"
+                  % (step, tx, tz, info["distance"], r))
+        step += 1
     return total, info["distance"], term
 
 
-def evaluate(env, model, episodes, deterministic):
+def evaluate(env, model, episodes, deterministic, verbose=False):
     rewards, dists, reached = [], [], 0
     for ep in range(episodes):
-        total, dist, term = run_episode(env, model, deterministic)
+        if verbose:
+            print("  episodio %d:" % ep)
+        total, dist, term = run_episode(env, model, deterministic, verbose)
         rewards.append(total)
         dists.append(dist)
         reached += int(term)
@@ -36,15 +44,17 @@ def main():
     p.add_argument("--uri", default="http://localhost:6000")
     p.add_argument("--episodes", type=int, default=10)
     p.add_argument("--mode", choices=["deterministic", "stochastic", "both"], default="both")
+    p.add_argument("--verbose", action="store_true",
+                   help="traza paso a paso (target, distancia, reward) para analizar el comportamiento")
     args = p.parse_args()
 
     env = ZeroADGatherEnv(open(args.config).read(), uri=args.uri)
     model = SAC.load(args.model)
 
     if args.mode in ("deterministic", "both"):
-        evaluate(env, model, args.episodes, deterministic=True)
+        evaluate(env, model, args.episodes, deterministic=True, verbose=args.verbose)
     if args.mode in ("stochastic", "both"):
-        evaluate(env, model, args.episodes, deterministic=False)
+        evaluate(env, model, args.episodes, deterministic=False, verbose=args.verbose)
 
 
 if __name__ == "__main__":
