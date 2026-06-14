@@ -23,7 +23,7 @@
 - `rl/requirements.txt` — dependencias Python.
 - `rl/README.md` — cómo lanzar el juego y entrenar.
 
-**Convención de coordenadas:** la API de 0 A.D. devuelve `position() = [x, y, z]` en **metros**; el plano del suelo es `(x, z)` (índices 0 y 2). Todas las funciones puras trabajan con tuplas `(x, z)` de 2 elementos.
+**Convención de coordenadas (confirmado por el spike de Task 3):** la API de 0 A.D. devuelve `position() = [x, z]` ya en el plano del suelo, en **metros** (2 elementos, NO `[x, y, z]`). `map_size_m = 512` para `Size=128`. Todas las funciones puras trabajan con tuplas `(x, z)`.
 
 ---
 
@@ -202,8 +202,9 @@ git commit -m "rl: add reset config for the gather debug scenario"
 import numpy as np
 from rl.gather.core import xz, distance, normalize_coord, denormalize_action
 
-def test_xz_extracts_ground_plane():
-    assert xz([10.0, 5.0, 20.0]) == (10.0, 20.0)
+def test_xz_passes_through_ground_plane():
+    # position() de 0 A.D. ya devuelve [x, z] en metros (2 elementos).
+    assert xz([176, 256]) == (176.0, 256.0)
 
 def test_distance_is_euclidean_on_xz():
     assert distance((0.0, 0.0), (3.0, 4.0)) == 5.0
@@ -231,8 +232,8 @@ import numpy as np
 
 
 def xz(pos):
-    """0 A.D. position() es [x, y, z]; el plano del suelo es (x, z)."""
-    return (pos[0], pos[2])
+    """0 A.D. position() ya devuelve [x, z] en metros (2 elementos)."""
+    return (float(pos[0]), float(pos[1]))
 
 
 def distance(p1, p2):
