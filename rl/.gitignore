@@ -1,0 +1,4 @@
+# Artefactos regenerables del experimento de RL
+__pycache__/
+*.pyc
+*.zip          # modelos entrenados (regenerables con train.py)
