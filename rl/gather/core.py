@@ -20,3 +20,22 @@ def denormalize_action(action, map_size_m):
     x = (float(action[0]) + 1.0) * 0.5 * map_size_m
     z = (float(action[1]) + 1.0) * 0.5 * map_size_m
     return (x, z)
+
+
+def build_observation(villager_xz, resource_xz, map_size_m):
+    d = distance(villager_xz, resource_xz)
+    return np.array([
+        normalize_coord(villager_xz[0], map_size_m),
+        normalize_coord(villager_xz[1], map_size_m),
+        normalize_coord(resource_xz[0], map_size_m),
+        normalize_coord(resource_xz[1], map_size_m),
+        d / map_size_m,
+    ], dtype=np.float32)
+
+
+def gather_reward(prev_dist, cur_dist):
+    return float(prev_dist - cur_dist)
+
+
+def is_reached(cur_dist, threshold):
+    return bool(cur_dist < threshold)
