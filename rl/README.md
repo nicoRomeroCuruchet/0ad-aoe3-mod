@@ -9,37 +9,79 @@ el agente **aprende la política óptima**: en un run de 2000 steps el reward me
 ~74 a **~151** (máximo ~150) y los episodios se acortan de 50 a ~12 (llega al recurso cada vez
 más rápido). Modelo entrenado: `rl/sac_gather.zip`.
 
-## Setup (una vez)
+## Cómo correr todo (paso a paso)
+
+> **Reglas de oro:**
+> 1. Todos los comandos se corren **desde la raíz del repo** (donde está la carpeta `rl/`),
+>    si no, los `import rl.*` fallan: `cd ~/dev/research/0ad-aoe3-mod`
+> 2. Siempre usá el **Python 3.11** standalone (no el del sistema):
+>    `~/Documents/0ad/.toolchain/python/bin/python3`
+> 3. **Un server = un cliente.** El server se cierra cuando el cliente (eval/train) se
+>    desconecta → relanzá `run_server.sh` para cada corrida.
+
+### Paso 0 — Instalar dependencias (una sola vez)
 
 ```bash
-PY=~/Documents/0ad/.toolchain/python/bin/python3   # Python 3.11 (ver MANUAL.md)
+cd ~/dev/research/0ad-aoe3-mod
+PY=~/Documents/0ad/.toolchain/python/bin/python3
 $PY -m pip install -r rl/requirements.txt
 $PY -m pip install ~/Documents/0ad/source/tools/rlclient/python   # cliente zero_ad
 ```
 
-## Probarlo / evaluar el modelo
+> Si `~/Documents/0ad/.toolchain` no existe, recrealo según `MANUAL.md` (Python 3.11 efímero),
+> o usá cualquier otro Python 3.11 con esas deps.
 
-Necesitás **dos terminales**.
+### Paso 1 — Arrancar el server de 0 A.D. (Terminal 1)
 
-**Terminal 1 — arrancar el server RL** (robusto; Ctrl+C para detener):
 ```bash
+cd ~/dev/research/0ad-aoe3-mod
 bash rl/run_server.sh
 ```
+Esperá hasta que imprima **`Server RL listo en 127.0.0.1:6000`** (se abre la ventana del juego).
+Dejá esta terminal abierta. `Ctrl+C` para detener el server.
 
-**Terminal 2 — evaluar el agente entrenado** (mirá cómo se acerca al recurso):
+### Paso 2 — Correr la política / evaluar (Terminal 2)
+
 ```bash
+cd ~/dev/research/0ad-aoe3-mod
 PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m rl.eval --verbose                 # traza paso a paso (target, distancia, reward)
-# opciones: --episodes N  --mode deterministic|stochastic|both  --model rl/sac_gather
+$PY -m rl.eval --mode stochastic --delay 0.4 --verbose
 ```
+Esto carga el modelo `rl/sac_gather.zip` y **ejecuta la política**: el aldeano camina hacia el
+árbol en la ventana de 0 A.D.
 
-**Reentrenar** (en vez de evaluar):
+Opciones de `rl.eval`:
+
+| Flag | Para qué |
+|------|----------|
+| `--mode stochastic\|deterministic\|both` | `stochastic` llega al árbol; `deterministic` usa la acción media |
+| `--delay 0.4` | pausa (seg) entre pasos, para **seguir la partida con el ojo** |
+| `--verbose` | imprime paso a paso (target, distancia, reward) |
+| `--episodes N` | cuántos episodios correr (default 10) |
+| `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
+| `--model rl/sac_gather` | qué modelo cargar |
+
+### Reentrenar (opcional)
+
 ```bash
-$PY -m rl.train --timesteps 2000         # entrena SAC y guarda rl/sac_gather.zip
+cd ~/dev/research/0ad-aoe3-mod          # con el server del Paso 1 corriendo
+PY=~/Documents/0ad/.toolchain/python/bin/python3
+$PY -m rl.train --timesteps 2000        # entrena SAC y guarda rl/sac_gather.zip
 ```
 
-> **Importante:** un server = un cliente. El server se cierra cuando el cliente (eval/train)
-> se desconecta, así que volvé a correr `run_server.sh` para cada sesión.
+### Correr los tests (no necesitan el juego)
+
+```bash
+cd ~/dev/research/0ad-aoe3-mod
+~/Documents/0ad/.toolchain/python/bin/python3 -m pytest rl/tests/ -v
+```
+
+### Si algo se traba
+
+```bash
+pkill -9 -f pyrogenesis          # matar servers colgados (OJO: el proceso se llama 'main')
+```
+y relanzá el Paso 1. (Detalle en "Lecciones del server headless" más abajo.)
 
 ## Qué vas a ver
 
@@ -58,7 +100,7 @@ Con `--mode both --verbose`:
 | `gather/core.py` | Funciones puras (geometría, normalización, observación, reward) — con tests |
 | `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad` |
 | `train.py` | Entrena SAC + eval rápida al final |
-| `eval.py` | Evalúa un modelo guardado (determinista/estocástico, `--verbose`) |
+| `eval.py` | Corre/evalúa un modelo guardado (`--mode`, `--delay`, `--verbose`, `--replay`, `--episodes`) |
 | `run_server.sh` | Lanza 0 A.D. headless con la interfaz RL de forma confiable |
 | `reset_config.json` | Config de la partida (mapa `random/rl_gather`, civ athenai, 1 jugador) |
 | `tests/` | `pytest rl/tests/` (lógica pura, no necesita el juego) |
