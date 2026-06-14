@@ -14,8 +14,10 @@ class ZeroADGatherEnv(gym.Env):
     metadata = {"render_modes": []}
 
     def __init__(self, scenario_config, uri="http://localhost:6000",
-                 map_size_m=512.0, horizon=50, reach_threshold=4.0,
+                 map_size_m=512.0, horizon=50, reach_threshold=12.0,
                  sim_steps_per_action=10):
+        # reach_threshold=12: el aldeano no puede pisar el arbol (obstaculo solido);
+        # se frena a ~9.5m del centro, asi que "llegar" se cuenta a <12m.
         super().__init__()
         self.game = zero_ad.ZeroAD(uri)
         self.scenario_config = scenario_config
