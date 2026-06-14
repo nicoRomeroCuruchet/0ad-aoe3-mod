@@ -29,7 +29,34 @@ NO Escaramuza) → civilización **"Athenai (AOE3 Mod)"**. Empezás con Pericles
 
 ---
 
-## Full Installation (from source)
+## Compilación automática (recomendado) — `setup.sh`
+
+Para **Ubuntu 24.04 y 26.04** hay un script que hace TODO de punta a punta (deps, clona 0 A.D.,
+parches, compila, instala y habilita el mod). Es idempotente (se puede re-correr):
+
+```bash
+# 1. Clonar este repo
+git clone git@github.com:nicoRomeroCuruchet/0ad-aoe3-mod.git ~/dev/0ad-aoe3-mod
+cd ~/dev/0ad-aoe3-mod
+
+# 2. Un comando (pide sudo para las deps; tarda ~1 h: descarga + compila)
+bash setup.sh
+
+# 3. Jugar
+cd ~/Documents/0ad/binaries/system
+./pyrogenesis -mod=mod -mod=public -mod=aoe3
+```
+
+> Verificado end-to-end en **Ubuntu 26.04**. Diseñado también para **24.04** (mismo enfoque:
+> Python 3.11 efímero + parches inocuos); en 24.04 conviene una primera corrida de prueba.
+> El destino del código de 0 A.D. es `~/Documents/0ad` (cambialo con `OAD=/otra/ruta bash setup.sh`).
+
+La sección de abajo es el **paso a paso manual** (lo que el script automatiza), útil para entender
+o depurar. Los problemas concretos y sus parches están en **"Build Notes & Known Issues"**.
+
+---
+
+## Full Installation (from source) — paso a paso manual
 
 ### 1. System dependencies
 
