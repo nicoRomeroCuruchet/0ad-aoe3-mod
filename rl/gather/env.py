@@ -15,12 +15,13 @@ class ZeroADGatherEnv(gym.Env):
 
     def __init__(self, scenario_config, uri="http://localhost:6000",
                  map_size_m=512.0, horizon=50, reach_threshold=12.0,
-                 sim_steps_per_action=10):
+                 sim_steps_per_action=10, save_replay=False):
         # reach_threshold=12: el aldeano no puede pisar el arbol (obstaculo solido);
         # se frena a ~9.5m del centro, asi que "llegar" se cuenta a <12m.
         super().__init__()
         self.game = zero_ad.ZeroAD(uri)
         self.scenario_config = scenario_config
+        self.save_replay = save_replay
         self.map_size_m = map_size_m
         self.horizon = horizon
         self.reach_threshold = reach_threshold
@@ -37,7 +38,7 @@ class ZeroADGatherEnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.game.reset(self.scenario_config)
+        self.game.reset(self.scenario_config, save_replay=self.save_replay)
         state = self.game.step()  # un tick para que las entidades existan
         v, r = self._positions(state)
         self._prev_dist = distance(v, r)

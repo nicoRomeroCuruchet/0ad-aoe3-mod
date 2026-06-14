@@ -51,9 +51,11 @@ def main():
                    help="traza paso a paso (target, distancia, reward) para analizar el comportamiento")
     p.add_argument("--delay", type=float, default=0.0,
                    help="segundos de pausa entre steps (p.ej. 0.3) para SEGUIR la partida en la ventana de 0 A.D.")
+    p.add_argument("--replay", action="store_true",
+                   help="guarda un replay de cada episodio para verlo después en 0 A.D. (menú Replays)")
     args = p.parse_args()
 
-    env = ZeroADGatherEnv(open(args.config).read(), uri=args.uri)
+    env = ZeroADGatherEnv(open(args.config).read(), uri=args.uri, save_replay=args.replay)
     model = SAC.load(args.model)
 
     if args.mode in ("deterministic", "both"):
