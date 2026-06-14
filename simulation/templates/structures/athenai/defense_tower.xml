@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Stub athenai: hereda del roster vanilla athen para completar la civ.
+     Generado para compatibilidad con 0 A.D. trunk; ajustar a gusto. -->
+<Entity parent="structures/athen/defense_tower">
+  <Identity>
+    <Civ>athenai</Civ>
+  </Identity>
+</Entity>

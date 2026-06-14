@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Inherits from the base 0ad civilian template -->
-<Entity parent="template_unit_support_civilian">
+<!-- Inherits from the base 0ad civilian template.
+     NOTE: en 0 A.D. trunk (0.0.27) la villager genérica se llama
+     template_unit_support_female_citizen (antes template_unit_support_civilian). -->
+<Entity parent="template_unit_support_female_citizen">
 
   <Identity>
     <GenericName>Villager</GenericName>
     <SpecificName>Villager</SpecificName>
-    <Icon>units/athen/support_civilian.png</Icon>
+    <Icon>units/athen/support_female_citizen.png</Icon>
   </Identity>
 
   <Cost>
@@ -51,7 +53,7 @@
 
   <!-- Uses the existing Athenian female citizen visual model -->
   <VisualActor>
-    <Actor>units/athenians/citizen_female.xml</Actor>
+    <Actor>units/athenians/female_citizen.xml</Actor>
   </VisualActor>
 
 </Entity>

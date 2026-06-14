@@ -1,7 +1,7 @@
 Engine.LoadLibrary("rmgen");
 Engine.LoadLibrary("rmgen-common");
 
-export function* generateMap(mapSettings)
+function* GenerateMap()
 {
 	// ── Primary terrain textures ──────────────────────────────────
 	const tGrass        = "medit_grass_field";
@@ -118,7 +118,7 @@ export function* generateMap(mapSettings)
 	yield 20;
 
 	// ── 6. Player bases ───────────────────────────────────────────
-	const { playerIDs, playerPosition } = playerPlacementCircle(fractionToTiles(0.35));
+	const [playerIDs, playerPosition] = playerPlacementCircle(fractionToTiles(0.35));
 
 	for (let i = 0; i < getNumPlayers(); ++i)
 	{

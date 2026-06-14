@@ -17,6 +17,6 @@
     </Rates>
   </ResourceGatherer>
   <VisualActor>
-    <Actor>units/athenians/citizen_female.xml</Actor>
+    <Actor>units/athenians/female_citizen.xml</Actor>
   </VisualActor>
 </Entity>
