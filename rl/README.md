@@ -116,7 +116,18 @@ El mapa determinista (1 Polites + 1 árbol) está en `maps/random/rl_gather.{js,
 - **No abrir conexiones TCP de prueba** al puerto del RL interface (lo desestabiliza); esperar la
   línea `RL interface listening` en el log.
 
-## Próximo (M1)
+## Roadmap
 
-Reward = Δstock real (emitir `gather`) en vez de acercamiento. Antes, hacer el `env` **resiliente**
-(reintentar/relanzar el server ante desconexiones) para entrenamientos largos confiables.
+- **M1** — Reward = Δstock real (emitir `gather`) en vez de acercamiento. *Antes*, hacer el `env`
+  **resiliente** (reintentar/relanzar el server ante desconexiones) para entrenamientos largos confiables.
+- **M2** — 4 aldeanos + varios recursos. Acción `Box(8,)` (un punto por aldeano), reward = Δstock
+  colectivo. Sigue con posiciones **conocidas** (observación incluye los recursos).
+- **M3+ (idea futura) — Exploración con niebla de guerra.** Un salto de dificultad: el agente
+  **no** conoce dónde están los recursos y tiene que **explorar para encontrarlos**.
+  Implica:
+  - Observabilidad **parcial**: la observación NO incluye las posiciones de los recursos
+    (solo lo revelado por la niebla de guerra) → quizás obs basada en un mapa/grilla de visibilidad.
+  - Reward por **encontrar/recolectar** de verdad (no por acercarse a un punto conocido).
+  - El agente debe **aprender a explorar** (mucho más caro de entrenar; probablemente requiera
+    recurrencia/memoria o curiosidad/intrinsic reward).
+  - Es un problema cualitativamente distinto a M0–M2 (búsqueda, no navegación a objetivo conocido).
