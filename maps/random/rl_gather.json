@@ -1,0 +1,9 @@
+{
+	"settings": {
+		"Name": "RL Gather (debug)",
+		"Script": "rl_gather.js",
+		"Description": "Escenario mínimo de RL: 1 aldeano + 1 árbol.",
+		"CircularMap": false,
+		"BaseTerrain": ["medit_grass_field"]
+	}
+}
