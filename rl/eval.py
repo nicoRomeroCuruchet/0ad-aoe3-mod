@@ -8,6 +8,8 @@ import time
 from pathlib import Path
 from typing import Sequence
 
+import numpy as np
+
 from rl.agents.registry import (
     AgentCapabilityError,
     build_policy,
@@ -77,6 +79,19 @@ def apply_overrides(
     )
 
 
+def _format_observation(env: object, observation: object) -> str:
+    values = np.asarray(observation).reshape(-1)
+    labels = tuple(getattr(env, "observation_labels", ()))
+    if len(labels) == len(values):
+        contents = ", ".join(
+            f"{label}={float(value):.9g}"
+            for label, value in zip(labels, values, strict=True)
+        )
+    else:
+        contents = ", ".join(f"{float(value):.9g}" for value in values)
+    return f"observation=[{contents}]"
+
+
 def make_step_observer(
     env: object,
     *,
@@ -102,8 +117,9 @@ def make_step_observer(
             target = f"target=({x:.0f},{z:.0f})"
         distance = record.info.get("distance")
         distance_text = "" if distance is None else f" dist={float(distance):.1f}"
+        observation_text = _format_observation(env, record.observation)
         print(
-            f"    step {record.step:2d}: {target}{distance_text} "
+            f"    step {record.step:2d}: {observation_text} {target}{distance_text} "
             f"reward={record.reward:+.2f}"
         )
 

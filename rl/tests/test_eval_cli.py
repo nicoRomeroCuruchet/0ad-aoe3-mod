@@ -33,6 +33,13 @@ SB3_EXPERIMENT = ORACLE_EXPERIMENT.replace('name = "oracle"', 'name = "sb3_sac"'
 
 class OneStepEnv:
     map_size_m = 512.0
+    observation_labels = (
+        "villager_x_norm",
+        "villager_z_norm",
+        "resource_x_norm",
+        "resource_z_norm",
+        "distance_norm",
+    )
 
     def __init__(self):
         self.closed = False
@@ -139,6 +146,10 @@ def test_verbose_observer_reports_denormalized_target_and_applies_delay(
     record = StepRecord(
         episode=1,
         step=2,
+        observation=np.array(
+            [0.12345679, 0.0, 0.5, -0.5, 0.25],
+            dtype=np.float32,
+        ),
         action=np.array([0.5, -0.5], dtype=np.float32),
         reward=1.25,
         terminated=False,
@@ -151,6 +162,11 @@ def test_verbose_observer_reports_denormalized_target_and_applies_delay(
     assert delays == [0.2]
     output = capsys.readouterr().out
     assert "step  2" in output
+    assert (
+        "observation=[villager_x_norm=0.123456791, villager_z_norm=0, "
+        "resource_x_norm=0.5, resource_z_norm=-0.5, distance_norm=0.25]"
+        in output
+    )
     assert "target=(384,128)" in output
     assert "dist=8.0" in output
 

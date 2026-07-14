@@ -115,6 +115,9 @@ def test_run_episode_emits_immutable_algorithm_independent_step_records():
     assert records[-1].reward == 2.0
     assert records[-1].terminated is True
     assert records[-1].info == {"distance": 0.0}
+    np.testing.assert_array_equal(records[0].observation, np.array([0.0]))
+    np.testing.assert_array_equal(records[1].observation, np.array([1.0]))
+    assert records[-1].observation.flags.writeable is False
     assert records[-1].action.flags.writeable is False
 
     with pytest.raises(FrozenInstanceError):

@@ -32,6 +32,7 @@ class StepRecord:
 
     episode: int
     step: int
+    observation: np.ndarray
     action: np.ndarray
     reward: float
     terminated: bool
@@ -39,8 +40,11 @@ class StepRecord:
     info: Mapping[str, Any]
 
     def __post_init__(self) -> None:
+        frozen_observation = np.asarray(self.observation).copy()
+        frozen_observation.setflags(write=False)
         frozen_action = np.asarray(self.action).copy()
         frozen_action.setflags(write=False)
+        object.__setattr__(self, "observation", frozen_observation)
         object.__setattr__(self, "action", frozen_action)
         object.__setattr__(self, "reward", float(self.reward))
         object.__setattr__(self, "info", _freeze_mapping(self.info))
@@ -105,6 +109,7 @@ def run_episode(
     final_info: Mapping[str, Any] = {}
 
     while not (terminated or truncated):
+        policy_observation = np.asarray(observation).copy()
         action = policy.act(
             observation,
             deterministic=deterministic,
@@ -115,6 +120,7 @@ def run_episode(
                 StepRecord(
                     episode=episode,
                     step=steps,
+                    observation=policy_observation,
                     action=action,
                     reward=reward,
                     terminated=bool(terminated),
