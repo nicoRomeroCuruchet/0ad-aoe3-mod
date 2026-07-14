@@ -16,12 +16,12 @@ class FakeState:
     villager: FakeUnit
     resource: FakeUnit
 
-    def units(self, *, owner, type):
+    def units(self, *, owner, entity_type):
         units_by_query = {
             (1, "polites"): [self.villager],
             (0, "tree"): [self.resource],
         }
-        return units_by_query[(owner, type)]
+        return units_by_query[(owner, entity_type)]
 
 
 class FakeGame:

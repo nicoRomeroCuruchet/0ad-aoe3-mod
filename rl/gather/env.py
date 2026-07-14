@@ -76,8 +76,8 @@ class ZeroADGatherEnv(gym.Env):
         self._closed = False
 
     def _positions(self, state):
-        v = xz(state.units(owner=1, type=VILLAGER_TYPE)[0].position())
-        r = xz(state.units(owner=0, type=RESOURCE_TYPE)[0].position())
+        v = xz(state.units(owner=1, entity_type=VILLAGER_TYPE)[0].position())
+        r = xz(state.units(owner=0, entity_type=RESOURCE_TYPE)[0].position())
         return v, r
 
     def reset(self, *, seed=None, options=None):
@@ -91,7 +91,10 @@ class ZeroADGatherEnv(gym.Env):
 
     def step(self, action):
         x, z = denormalize_action(action, self.map_size_m)
-        villager = self.game.current_state.units(owner=1, type=VILLAGER_TYPE)[0]
+        villager = self.game.current_state.units(
+            owner=1,
+            entity_type=VILLAGER_TYPE,
+        )[0]
         cmd = self.actions.walk([villager], x, z)
         state = self.game.step([cmd])
         for _ in range(self.sim_steps_per_action - 1):
