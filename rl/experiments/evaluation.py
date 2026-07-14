@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from statistics import fmean
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 import numpy as np
 
-from rl.agents.base import EpisodeResult, Policy
+from rl.agents.base import EpisodeResult, Policy, _freeze_mapping
 
 
 class EvaluationEnv(Protocol):
@@ -24,6 +24,29 @@ class EvaluationEnv(Protocol):
         self,
         action: np.ndarray,
     ) -> tuple[np.ndarray, float, bool, bool, Mapping[str, Any]]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class StepRecord:
+    """One immutable transition emitted for visualization or diagnostics."""
+
+    episode: int
+    step: int
+    action: np.ndarray
+    reward: float
+    terminated: bool
+    truncated: bool
+    info: Mapping[str, Any]
+
+    def __post_init__(self) -> None:
+        frozen_action = np.asarray(self.action).copy()
+        frozen_action.setflags(write=False)
+        object.__setattr__(self, "action", frozen_action)
+        object.__setattr__(self, "reward", float(self.reward))
+        object.__setattr__(self, "info", _freeze_mapping(self.info))
+
+
+StepObserver = Callable[[StepRecord], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +89,7 @@ def run_episode(
     episode: int,
     deterministic: bool,
     seed: int | None = None,
+    observer: StepObserver | None = None,
 ) -> EpisodeResult:
     """Run one episode and return its complete terminal summary."""
 
@@ -86,6 +110,18 @@ def run_episode(
             deterministic=deterministic,
         )
         observation, reward, terminated, truncated, final_info = env.step(action)
+        if observer is not None:
+            observer(
+                StepRecord(
+                    episode=episode,
+                    step=steps,
+                    action=action,
+                    reward=reward,
+                    terminated=bool(terminated),
+                    truncated=bool(truncated),
+                    info=final_info,
+                )
+            )
         total_reward += float(reward)
         steps += 1
 
@@ -106,6 +142,7 @@ def evaluate(
     episodes: int,
     deterministic: bool,
     seed: int | None = None,
+    observer: StepObserver | None = None,
 ) -> EvaluationReport:
     """Evaluate one policy with consecutive, reproducible episode seeds."""
 
@@ -119,6 +156,7 @@ def evaluate(
             episode=episode,
             deterministic=deterministic,
             seed=None if seed is None else seed + episode,
+            observer=observer,
         )
         for episode in range(episodes)
     )

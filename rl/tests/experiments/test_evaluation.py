@@ -3,7 +3,12 @@ from dataclasses import FrozenInstanceError
 import numpy as np
 import pytest
 
-from rl.experiments.evaluation import EvaluationReport, evaluate, run_episode
+from rl.experiments.evaluation import (
+    EvaluationReport,
+    StepRecord,
+    evaluate,
+    run_episode,
+)
 
 
 class TwoStepEnv:
@@ -93,6 +98,29 @@ def test_run_episode_preserves_truncation_status():
     assert result.final_info == {"reason": "limit"}
 
 
+def test_run_episode_emits_immutable_algorithm_independent_step_records():
+    records = []
+
+    run_episode(
+        TwoStepEnv(),
+        RecordingPolicy(),
+        episode=3,
+        deterministic=True,
+        observer=records.append,
+    )
+
+    assert [record.step for record in records] == [0, 1]
+    assert all(isinstance(record, StepRecord) for record in records)
+    assert records[-1].episode == 3
+    assert records[-1].reward == 2.0
+    assert records[-1].terminated is True
+    assert records[-1].info == {"distance": 0.0}
+    assert records[-1].action.flags.writeable is False
+
+    with pytest.raises(FrozenInstanceError):
+        records[-1].step = 10
+
+
 def test_evaluate_returns_immutable_results_and_aggregates():
     env = TwoStepEnv()
     policy = RecordingPolicy()
@@ -115,6 +143,25 @@ def test_evaluate_returns_immutable_results_and_aggregates():
 
     with pytest.raises(FrozenInstanceError):
         report.episodes = ()
+
+
+def test_evaluate_forwards_one_observer_across_episodes():
+    records = []
+
+    evaluate(
+        TwoStepEnv(),
+        RecordingPolicy(),
+        episodes=2,
+        deterministic=False,
+        observer=records.append,
+    )
+
+    assert [(record.episode, record.step) for record in records] == [
+        (0, 0),
+        (0, 1),
+        (1, 0),
+        (1, 1),
+    ]
 
 
 def test_evaluation_report_freezes_directly_supplied_results():

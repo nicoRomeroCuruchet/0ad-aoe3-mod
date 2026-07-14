@@ -5,9 +5,9 @@ para ir a 1 recurso**, usando la interfaz RL nativa de 0 A.D. (`--rl-interface`)
 `zero_ad`, envuelto en un `gymnasium.Env`.
 
 **Estado: M0 cumplido.** El loop completo (Gymnasium ↔ Stable-Baselines3 ↔ 0 A.D.) funciona y
-el agente **aprende la política óptima**: en un run de 2000 steps el reward medio sube de
-~74 a **~151** (máximo ~150) y los episodios se acortan de 50 a ~12 (llega al recurso cada vez
-más rápido). Modelo entrenado: `rl/sac_gather.zip`.
+el agente **aprende la política óptima**: en un run de 2000 steps el reward medio subió de
+~74 a **~151** (máximo ~150) y los episodios se acortaron de 50 a ~12. Los checkpoints son
+regenerables, no se versionan, y ahora quedan aislados por corrida en `rl/runs/`.
 
 ## Cómo correr todo (paso a paso)
 
@@ -45,35 +45,55 @@ Dejá esta terminal abierta. `Ctrl+C` para detener el server.
 ```bash
 cd ~/dev/research/0ad-aoe3-mod
 PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m rl.eval --mode stochastic --delay 0.4 --verbose
+$PY -m rl.eval --experiment rl/configs/m0_oracle.toml --mode deterministic --delay 0.4 --verbose
 ```
-Esto carga el modelo `rl/sac_gather.zip` y **ejecuta la política**: el aldeano camina hacia el
-árbol en la ventana de 0 A.D.
+Esto ejecuta el **oracle** (baseline que apunta directamente a las coordenadas del recurso): el
+aldeano camina hacia el árbol en la ventana de 0 A.D. Para evaluar un modelo aprendido, indicá
+su experimento y checkpoint:
+
+```bash
+$PY -m rl.eval --experiment rl/configs/m0_sb3_sac.toml \
+  --model rl/runs/<corrida>/model --trust-model --mode both
+```
+
+> Los checkpoints de SB3 pueden contener objetos Python serializados. Cargá sólo modelos que
+> generaste vos o cuya fuente confiás; `--trust-model` hace explícita esa decisión.
 
 Opciones de `rl.eval`:
 
 | Flag | Para qué |
 |------|----------|
-| `--mode stochastic\|deterministic\|both` | `stochastic` llega al árbol; `deterministic` usa la acción media |
+| `--mode configured\|stochastic\|deterministic\|both` | por defecto respeta `evaluation.deterministic`; `both` compara ambos modos |
 | `--delay 0.4` | pausa (seg) entre pasos, para **seguir la partida con el ojo** |
 | `--verbose` | imprime paso a paso (target, distancia, reward) |
 | `--episodes N` | cuántos episodios correr (default 10) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
-| `--model rl/sac_gather` | qué modelo cargar |
+| `--experiment rl/configs/...toml` | entorno, agente, seeds e hiperparámetros |
+| `--model rl/runs/.../model` | checkpoint; sólo hace falta para agentes aprendidos |
+| `--trust-model` | confirma que el checkpoint es confiable antes de deserializarlo |
+| `--allow-remote-server` | habilita explícitamente un server no local; sólo si confiás en él |
 
 ### Reentrenar (opcional)
 
 ```bash
 cd ~/dev/research/0ad-aoe3-mod          # con el server del Paso 1 corriendo
 PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m rl.train --timesteps 2000        # entrena SAC y guarda rl/sac_gather.zip
+$PY -m rl.train --experiment rl/configs/m0_sb3_sac.toml --timesteps 2000
 ```
+
+Cada corrida crea una carpeta ignorada por git en `rl/runs/` con el modelo, la config resuelta,
+las métricas por episodio y metadata. El comando imprime la ruta exacta al terminar.
+El modelo se guarda **antes** de la evaluación final: si el server se corta durante esa etapa,
+el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente salvo que agregues
+`--force`.
 
 ### Correr los tests (no necesitan el juego)
 
 ```bash
 cd ~/dev/research/0ad-aoe3-mod
 ~/Documents/0ad/.toolchain/python/bin/python3 -m pytest rl/tests/ -v
+# Con el umbral de cobertura del repo (mínimo 80%):
+~/Documents/0ad/.toolchain/python/bin/python3 -m pytest --cov
 ```
 
 ### Si algo se traba
@@ -97,13 +117,19 @@ Con `--mode both --verbose`:
 
 | Archivo | Qué es |
 |---------|--------|
+| `agents/base.py` | Contratos mínimos `Policy`/`Trainer` y resultados inmutables |
+| `agents/registry.py` | Registro explícito de implementaciones y capacidades |
+| `agents/baselines.py` | Políticas random y oracle para validar/comparar |
+| `agents/sb3.py` | Adaptador de SAC de Stable-Baselines3; import opcional y tardío |
+| `agents/custom/` | Lugar de las implementaciones de los alumnos |
+| `experiments/` | Config TOML, construcción, entrenamiento, evaluación y artefactos comunes |
+| `configs/` | Experimentos versionados y comparables |
 | `gather/core.py` | Funciones puras (geometría, normalización, observación, reward) — con tests |
-| `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad` |
-| `train.py` | Entrena SAC + eval rápida al final |
-| `eval.py` | Corre/evalúa un modelo guardado (`--mode`, `--delay`, `--verbose`, `--replay`, `--episodes`) |
+| `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad`, con backend inyectable |
+| `train.py`, `eval.py` | CLIs finas: parsean opciones y delegan a los módulos anteriores |
 | `run_server.sh` | Lanza 0 A.D. headless con la interfaz RL de forma confiable |
 | `reset_config.json` | Config de la partida (mapa `random/rl_gather`, civ athenai, 1 jugador) |
-| `tests/` | `pytest rl/tests/` (lógica pura, no necesita el juego) |
+| `tests/` | Contratos unitarios/integración offline; no necesitan el juego ni `zero_ad` |
 
 El mapa determinista (1 Polites + 1 árbol) está en `maps/random/rl_gather.{js,json}` (parte del mod).
 
@@ -132,7 +158,38 @@ El mapa determinista (1 Polites + 1 árbol) está en `maps/random/rl_gather.{js,
     recurrencia/memoria o curiosidad/intrinsic reward).
   - Es un problema cualitativamente distinto a M0–M2 (búsqueda, no navegación a objetivo conocido).
 
-## Para alumnos / por dónde empezar
+## Arquitectura modular para alumnos
+
+La dependencia central va en una sola dirección:
+
+```text
+config TOML -> registry -> Trainer.fit(TrainRequest) -> Policy
+                                                   |
+entorno Gym ---------------------------------------+-> evaluator -> métricas
+```
+
+El evaluador sólo llama `Policy.act()`: no sabe si la política viene de SAC, una red propia,
+una tabla, random o el oracle. Cada `Trainer` es dueño de su loop de actualización. Por eso se
+puede cambiar un algoritmo sin tocar el entorno y comparar todos con exactamente los mismos
+episodios y seeds.
+
+Para comprobar primero el pipeline y los dos extremos de referencia:
+
+```bash
+$PY -m rl.eval --experiment rl/configs/m0_random.toml --mode deterministic
+# relanzar el server (un server = un cliente)
+$PY -m rl.eval --experiment rl/configs/m0_oracle.toml --mode deterministic
+```
+
+El oracle **no aprende**: usa la posición del recurso presente en la observación y marca un techo
+de navegación para detectar errores del entorno/reward. Random marca el piso. El algoritmo del
+alumno debería compararse con ambos.
+
+Para sumar una implementación propia, seguí `agents/custom/README.md`: implementá un `Policy`,
+un `Trainer`, agregá una entrada explícita al registro y un TOML. Los tests del agente van en
+`tests/agents/` y usan entornos falsos; el test contra 0 A.D. queda como integración separada.
+
+## Por dónde empezar
 
 **La parte difícil ya está hecha: la infraestructura para entrenar.** Conectar el motor de 0 A.D.,
 un entorno tipo Gym estable, lanzar el server headless de forma confiable, el mapa y la config —
@@ -144,7 +201,7 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 |---|---|
 | Lanzar 0 A.D. headless de forma confiable | `run_server.sh` |
 | Entorno Gym (`reset`/`step`/obs/acción) | `gather/env.py` (lo **extienden**, no lo reescriben) |
-| Loop de entrenamiento + evaluación | `train.py`, `eval.py` |
+| Orquestación de entrenamiento + evaluación | `experiments/training.py`, `experiments/evaluation.py` |
 | Conexión al motor y acciones (`walk`/`gather`/…) | cliente `zero_ad` |
 | Mapa/escenario parametrizable | `maps/random/rl_gather.js` |
 | Funciones puras testeadas (geometría, obs, reward) | `gather/core.py` + `tests/` |
@@ -162,7 +219,8 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 - **Observación:** `build_observation()` en `gather/core.py` + `_positions()` en `env.py`.
 - **Acción / nº de aldeanos:** `action_space` y `step()` en `gather/env.py`.
 - **Escenario (recursos, tamaño, niebla):** `maps/random/rl_gather.js` + `reset_config.json`.
-- **Algoritmo / hiperparámetros:** `train.py` (hoy `SAC("MlpPolicy", ...)`).
+- **Algoritmo:** un `Policy` + `Trainer` en `agents/custom/`, conectado en `agents/registry.py`.
+- **Hiperparámetros:** un TOML propio en `configs/`; no se hardcodean en `train.py`.
 
 ### Dos advertencias honestas
 

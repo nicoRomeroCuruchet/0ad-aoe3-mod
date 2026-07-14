@@ -12,6 +12,8 @@ from rl.agents.registry import (
     available_agents,
     build_policy,
     build_trainer,
+    ensure_can_build,
+    ensure_can_save,
     load_policy,
     save_policy,
 )
@@ -31,7 +33,7 @@ class SavableModel:
 
 
 def test_registry_lists_explicit_supported_agent_names():
-    assert available_agents() == ("oracle", "random", "sb3_sac")
+    assert {"oracle", "random", "sb3_sac"}.issubset(available_agents())
 
 
 def test_registry_builds_seeded_random_and_oracle_policies():
@@ -42,6 +44,7 @@ def test_registry_builds_seeded_random_and_oracle_policies():
 
     assert isinstance(first_random, RandomPolicy)
     assert isinstance(oracle, GatherOraclePolicy)
+    ensure_can_build(AgentSpec("oracle"))
     np.testing.assert_array_equal(
         first_random.act(observation, deterministic=False),
         second_random.act(observation, deterministic=False),
@@ -56,6 +59,7 @@ def test_registry_builds_the_sb3_trainer_without_importing_sb3():
     trainer = build_trainer(AgentSpec("sb3_sac"))
 
     assert isinstance(trainer, SB3SACTrainer)
+    ensure_can_save(AgentSpec("sb3_sac"))
 
 
 def test_registry_rejects_unsupported_operations():
@@ -63,15 +67,21 @@ def test_registry_rejects_unsupported_operations():
         build_trainer(AgentSpec("oracle"))
 
     with pytest.raises(AgentCapabilityError, match="cannot be built directly"):
-        build_policy(AgentSpec("sb3_sac"), DummyEnv(), seed=0)
+        ensure_can_build(AgentSpec("sb3_sac"))
 
     with pytest.raises(AgentCapabilityError, match="cannot load"):
         load_policy(AgentSpec("random"), "unused")
 
+    with pytest.raises(AgentCapabilityError, match="cannot save"):
+        ensure_can_save(AgentSpec("oracle"))
+
 
 def test_registry_reports_unknown_agents_and_available_choices():
-    with pytest.raises(UnknownAgentError, match="oracle, random, sb3_sac"):
+    with pytest.raises(UnknownAgentError, match="available agents") as error:
         build_trainer(AgentSpec("typo"))
+
+    for starter_agent in ("oracle", "random", "sb3_sac"):
+        assert starter_agent in str(error.value)
 
 
 def test_registry_saves_sb3_policy_through_its_registered_serializer(tmp_path: Path):

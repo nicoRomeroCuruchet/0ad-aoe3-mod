@@ -100,12 +100,19 @@ def _registration(agent: AgentSpec) -> AgentRegistration:
 def build_policy(agent: AgentSpec, env: Any, *, seed: int) -> Policy:
     """Construct a policy that does not require training or a checkpoint."""
 
+    ensure_can_build(agent)
     factory = _registration(agent).policy_factory
-    if factory is None:
+    assert factory is not None
+    return factory(agent, env, seed)
+
+
+def ensure_can_build(agent: AgentSpec) -> None:
+    """Fail before opening an environment when a checkpoint is required."""
+
+    if _registration(agent).policy_factory is None:
         raise AgentCapabilityError(
             f"agent '{agent.name}' cannot be built directly; train or load it",
         )
-    return factory(agent, env, seed)
 
 
 def build_trainer(agent: AgentSpec) -> Trainer:
@@ -118,7 +125,7 @@ def build_trainer(agent: AgentSpec) -> Trainer:
 
 
 def load_policy(agent: AgentSpec, path: str | Path) -> Policy:
-    """Load a checkpoint using the agent's registered serializer."""
+    """Load a trusted checkpoint using the agent's registered serializer."""
 
     loader = _registration(agent).loader
     if loader is None:
@@ -126,10 +133,17 @@ def load_policy(agent: AgentSpec, path: str | Path) -> Policy:
     return loader(agent, path)
 
 
+def ensure_can_save(agent: AgentSpec) -> None:
+    """Fail before training when no checkpoint serializer is registered."""
+
+    if _registration(agent).saver is None:
+        raise AgentCapabilityError(f"agent '{agent.name}' cannot save checkpoints")
+
+
 def save_policy(agent: AgentSpec, policy: Policy, path: str | Path) -> None:
     """Save a policy using the matching registered serializer."""
 
+    ensure_can_save(agent)
     saver = _registration(agent).saver
-    if saver is None:
-        raise AgentCapabilityError(f"agent '{agent.name}' cannot save checkpoints")
+    assert saver is not None
     saver(policy, path)

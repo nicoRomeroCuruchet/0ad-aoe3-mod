@@ -61,6 +61,16 @@ def test_horizon_truncates_an_unfinished_episode(fake_backend):
     assert truncated is True
 
 
+def test_close_releases_an_injected_backend_once(fake_backend):
+    game, actions = fake_backend
+    env = ZeroADGatherEnv("scenario contents", game=game, actions=actions)
+
+    env.close()
+    env.close()
+
+    assert game.close_calls == 1
+
+
 def test_default_backend_reports_how_to_run_without_zero_ad(monkeypatch):
     monkeypatch.setitem(sys.modules, "zero_ad", None)
 

@@ -3,3 +3,5 @@ __pycache__/
 *.pyc
 # Modelos entrenados (regenerables con train.py)
 *.zip
+# Salidas completas de corridas (config resuelta, métricas y checkpoints)
+runs/

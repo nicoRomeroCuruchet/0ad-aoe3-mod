@@ -73,6 +73,7 @@ class ZeroADGatherEnv(gym.Env):
         self.action_space = spaces.Box(-1.0, 1.0, shape=(2,), dtype=np.float32)
         self._step_count = 0
         self._prev_dist = None
+        self._closed = False
 
     def _positions(self, state):
         v = xz(state.units(owner=1, type=VILLAGER_TYPE)[0].position())
@@ -104,3 +105,14 @@ class ZeroADGatherEnv(gym.Env):
         truncated = self._step_count >= self.horizon
         obs = build_observation(v, r, self.map_size_m)
         return obs, reward, terminated, truncated, {"distance": cur_dist}
+
+    def close(self):
+        """Release the optional live/injected backend exactly once."""
+
+        if self._closed:
+            return
+        self._closed = True
+        close_backend = getattr(self.game, "close", None)
+        if callable(close_backend):
+            close_backend()
+        super().close()

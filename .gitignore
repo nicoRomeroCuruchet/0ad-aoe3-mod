@@ -20,3 +20,9 @@ cache/
 
 # Local 0 A.D. runtime (large AppImage; installed by the developer, not tracked)
 .runtime/
+
+# Python test and coverage artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/

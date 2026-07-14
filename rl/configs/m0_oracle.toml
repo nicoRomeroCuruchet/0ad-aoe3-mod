@@ -1,0 +1,20 @@
+[environment]
+name = "zero_ad_gather"
+scenario = "rl/reset_config.json"
+uri = "http://localhost:6000"
+map_size_m = 512.0
+horizon = 50
+reach_threshold = 12.0
+sim_steps_per_action = 10
+
+[agent]
+name = "oracle"
+
+[training]
+total_steps = 5000
+seed = 0
+
+[evaluation]
+episodes = 10
+deterministic = true
+seed = 1000

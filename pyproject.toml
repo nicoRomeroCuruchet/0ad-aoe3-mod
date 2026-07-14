@@ -1,0 +1,17 @@
+[tool.pytest.ini_options]
+testpaths = ["rl/tests"]
+addopts = ["--strict-config", "--strict-markers"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+extend-exclude = [".runtime"]
+
+[tool.coverage.run]
+source = ["rl"]
+omit = ["rl/tests/*"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true

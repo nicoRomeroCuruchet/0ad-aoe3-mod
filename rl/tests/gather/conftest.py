@@ -31,6 +31,7 @@ class FakeGame:
         self.current_state = initial_state
         self.reset_calls = []
         self.step_calls = []
+        self.close_calls = 0
 
     def reset(self, scenario_config, *, save_replay=False):
         self.reset_calls.append((scenario_config, save_replay))
@@ -41,6 +42,9 @@ class FakeGame:
         if commands is not None:
             self.current_state = self.state_after_action
         return self.current_state
+
+    def close(self):
+        self.close_calls += 1
 
 
 class FakeActions:

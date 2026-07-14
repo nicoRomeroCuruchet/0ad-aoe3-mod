@@ -71,7 +71,11 @@ class SB3SACTrainer:
 
 
 def load_sb3_sac_policy(path: str | Path) -> SB3Policy:
-    """Load a serialized SAC model as a common Policy."""
+    """Load a trusted serialized SAC model as a common Policy.
+
+    SB3 checkpoints can contain cloudpickled Python objects. Callers must not
+    pass files from an untrusted source because loading can execute code.
+    """
 
     model = _load_sac_class().load(str(path))
     return SB3Policy(model)
