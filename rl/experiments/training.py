@@ -4,13 +4,51 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+import gymnasium as gym
+import numpy as np
+
 from rl.agents.base import AgentSpec, Policy, TrainRequest, Trainer
 from rl.agents.registry import build_trainer
 
 from .config import ExperimentConfig
+from .evaluation import DecisionObserver, DecisionRecord
 
 
 TrainerBuilder = Callable[[AgentSpec], Trainer]
+
+
+class DecisionObserverEnv(gym.Wrapper):
+    """Report the observation and action immediately before each training step."""
+
+    def __init__(self, env: gym.Env, observer: DecisionObserver):
+        super().__init__(env)
+        self._observer = observer
+        self._episode = -1
+        self._step = 0
+        self._observation: np.ndarray | None = None
+
+    def reset(self, *, seed=None, options=None):
+        observation, info = super().reset(seed=seed, options=options)
+        self._episode += 1
+        self._step = 0
+        self._observation = np.asarray(observation).copy()
+        return observation, info
+
+    def step(self, action):
+        if self._observation is None:
+            raise RuntimeError("environment must be reset before the first step")
+        self._observer(
+            DecisionRecord(
+                episode=self._episode,
+                step=self._step,
+                observation=self._observation,
+                action=action,
+            )
+        )
+        transition = super().step(action)
+        self._observation = np.asarray(transition[0]).copy()
+        self._step += 1
+        return transition
 
 
 def train_policy(
@@ -18,12 +56,16 @@ def train_policy(
     env: Any,
     *,
     trainer_builder: TrainerBuilder = build_trainer,
+    decision_observer: DecisionObserver | None = None,
 ) -> Policy:
     """Train the configured agent against an already-created environment."""
 
     trainer = trainer_builder(config.agent)
+    training_env = (
+        env if decision_observer is None else DecisionObserverEnv(env, decision_observer)
+    )
     request = TrainRequest(
-        env=env,
+        env=training_env,
         agent=config.agent,
         total_steps=config.training.total_steps,
         seed=config.training.seed,

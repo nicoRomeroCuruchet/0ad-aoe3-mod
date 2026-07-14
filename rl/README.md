@@ -91,8 +91,9 @@ El modelo se guarda **antes** de la evaluación final: si el server se corta dur
 el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente salvo que agregues
 `--force`.
 
-`make train` abre por defecto la vista local durante la **evaluación final** (después de guardar
-el modelo). Para sostener cada decisión medio segundo, usá
+`make train` abre por defecto la vista local **antes de empezar SAC** y la actualiza con cada
+decisión del entrenamiento; la misma ventana sigue activa durante la evaluación final. Para
+sostener cada decisión medio segundo, usá
 `make train ARGS="--delay 0.5"`. En una terminal sin escritorio o para una corrida desatendida,
 desactivala con `make train NO_AGENT_VIEW=1`.
 

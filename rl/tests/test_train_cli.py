@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
 
+import gymnasium as gym
 import numpy as np
 import pytest
+from gymnasium import spaces
 
 import rl.train as train_cli
 from rl.agents.base import EpisodeResult
@@ -36,9 +38,22 @@ class ConstantPolicy:
         return np.zeros(2, dtype=np.float32)
 
 
-class CloseableEnv:
+class CloseableEnv(gym.Env):
+    observation_space = spaces.Box(-1.0, 1.0, shape=(5,), dtype=np.float32)
+    action_space = spaces.Box(-1.0, 1.0, shape=(2,), dtype=np.float32)
+
     def __init__(self):
+        super().__init__()
         self.closed = False
+
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        del options
+        return np.full(5, 0.25, dtype=np.float32), {}
+
+    def step(self, action):
+        del action
+        return np.full(5, 0.5, dtype=np.float32), 0.0, True, False, {}
 
     def close(self):
         self.closed = True
@@ -120,9 +135,10 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
         calls["environment"] = (config, kwargs)
         return env
 
-    def fake_train_policy(config, selected_env):
+    def fake_train_policy(config, selected_env, *, decision_observer):
         calls["config"] = config
         calls["env"] = selected_env
+        calls["training_observer"] = decision_observer
         events.append("train")
         return ConstantPolicy()
 
@@ -161,6 +177,7 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
     assert calls["config"].training.total_steps == 12
     assert calls["saved"][2] == run_directories[0] / "model"
     assert calls["environment"][1] == {"allow_remote": True}
+    assert calls["training_observer"] is None
     assert calls["evaluation"][2]["decision_observer"] is None
     assert events == ["train", "save", "evaluate"]
     assert env.closed is True
@@ -192,7 +209,9 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
     monkeypatch.setattr(
         train_cli,
         "train_policy",
-        lambda config, selected_env: events.append("train") or ConstantPolicy(),
+        lambda config, selected_env, *, decision_observer: (
+            events.append("train") or ConstantPolicy()
+        ),
     )
     monkeypatch.setattr(
         train_cli,
@@ -222,7 +241,7 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
             ]
         )
 
-    assert events == ["train", "save", "open_view", "evaluate", "close_view"]
+    assert events == ["open_view", "train", "save", "evaluate", "close_view"]
     assert agent_view.closed is True
     assert env.closed is True
     run_directory = next((tmp_path / "runs").iterdir())
@@ -232,7 +251,7 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
     assert not (run_directory / "metrics.json").exists()
 
 
-def test_main_shows_and_paces_the_post_training_evaluation(
+def test_main_shows_and_paces_training_and_post_training_evaluation(
     tmp_path: Path,
     monkeypatch,
 ):
@@ -245,11 +264,21 @@ def test_main_shows_and_paces_the_post_training_evaluation(
         "build_environment",
         lambda config, **kwargs: env,
     )
-    monkeypatch.setattr(
-        train_cli,
-        "train_policy",
-        lambda config, selected_env: events.append("train") or ConstantPolicy(),
-    )
+
+    def fake_train_policy(config, selected_env, *, decision_observer):
+        del config, selected_env
+        events.append("train")
+        decision_observer(
+            DecisionRecord(
+                episode=0,
+                step=0,
+                observation=np.full(5, 0.25, dtype=np.float32),
+                action=np.ones(2, dtype=np.float32),
+            )
+        )
+        return ConstantPolicy()
+
+    monkeypatch.setattr(train_cli, "train_policy", fake_train_policy)
     monkeypatch.setattr(
         train_cli,
         "save_policy",
@@ -293,10 +322,16 @@ def test_main_shows_and_paces_the_post_training_evaluation(
 
     assert exit_code == 0
     assert opened_for == [env]
-    assert events[:4] == ["train", "save", "open_view", "evaluate"]
-    assert events[4][0] == "view"
-    assert events[5] == ("pause", 0.5)
-    assert events[6] == "close_view"
+    assert events[0:2] == ["open_view", "train"]
+    assert events[2][0] == "view"
+    np.testing.assert_array_equal(
+        events[2][1].observation,
+        np.full(5, 0.25, dtype=np.float32),
+    )
+    np.testing.assert_array_equal(events[2][1].action, np.ones(2, dtype=np.float32))
+    assert events[3:6] == [("pause", 0.5), "save", "evaluate"]
+    assert events[6][0] == "view"
+    assert events[7:] == [("pause", 0.5), "close_view"]
     assert agent_view.closed is True
     assert env.closed is True
 
@@ -311,7 +346,7 @@ def test_main_closes_the_environment_when_agent_view_close_fails(
     monkeypatch.setattr(
         train_cli,
         "train_policy",
-        lambda config, selected_env: ConstantPolicy(),
+        lambda config, selected_env, *, decision_observer: ConstantPolicy(),
     )
     monkeypatch.setattr(train_cli, "save_policy", lambda agent, policy, path: None)
     monkeypatch.setattr(train_cli, "open_agent_view", lambda selected_env: agent_view)
@@ -336,7 +371,7 @@ def test_main_closes_the_environment_when_agent_view_close_fails(
     assert env.closed is True
 
 
-def test_main_preserves_the_checkpoint_when_agent_view_cannot_open(
+def test_main_does_not_train_when_agent_view_cannot_open(
     tmp_path: Path,
     monkeypatch,
     capsys,
@@ -347,7 +382,9 @@ def test_main_preserves_the_checkpoint_when_agent_view_cannot_open(
     monkeypatch.setattr(
         train_cli,
         "train_policy",
-        lambda config, selected_env: events.append("train") or ConstantPolicy(),
+        lambda config, selected_env, *, decision_observer: (
+            events.append("train") or ConstantPolicy()
+        ),
     )
     monkeypatch.setattr(
         train_cli,
@@ -379,11 +416,10 @@ def test_main_preserves_the_checkpoint_when_agent_view_cannot_open(
 
     assert error.value.code == 2
     assert "no graphical display" in capsys.readouterr().err
-    assert events == ["train", "save", "open_view"]
+    assert events == ["open_view"]
     assert env.closed is True
     run_directory = next((tmp_path / "runs").iterdir())
-    metadata = json.loads((run_directory / "metadata.json").read_text(encoding="utf-8"))
-    assert metadata["status"] == "checkpoint_saved"
+    assert not (run_directory / "metadata.json").exists()
     assert not (run_directory / "metrics.json").exists()
 
 

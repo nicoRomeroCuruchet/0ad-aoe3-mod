@@ -112,10 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--agent-view",
         action="store_true",
-        help=(
-            "show the exact Polites policy observation during post-training "
-            "evaluation"
-        ),
+        help="show the exact Polites policy observation during training and evaluation",
     )
     parser.add_argument(
         "--delay",
@@ -178,7 +175,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     agent_view: AgentView | None = None
     try:
-        policy = train_policy(config, env)
+        if args.agent_view:
+            try:
+                agent_view = open_agent_view(env)
+            except AgentViewUnavailable as error:
+                parser.error(str(error))
+        decision_observer = (
+            None
+            if agent_view is None
+            else make_agent_view_observer(agent_view, delay=args.delay)
+        )
+        policy = train_policy(
+            config,
+            env,
+            decision_observer=decision_observer,
+        )
         model_path.parent.mkdir(parents=True, exist_ok=True)
         save_policy(config.agent, policy, model_path)
         metadata = {
@@ -195,22 +206,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "status": "checkpoint_saved",
             },
         )
-        if args.agent_view:
-            try:
-                agent_view = open_agent_view(env)
-            except AgentViewUnavailable as error:
-                parser.error(str(error))
         report = evaluate(
             env,
             policy,
             episodes=config.evaluation.episodes,
             deterministic=config.evaluation.deterministic,
             seed=config.evaluation.seed,
-            decision_observer=(
-                None
-                if agent_view is None
-                else make_agent_view_observer(agent_view, delay=args.delay)
-            ),
+            decision_observer=decision_observer,
         )
         record_evaluation(artifacts, report)
         record_run_context(
