@@ -58,11 +58,12 @@ no copies los caracteres `<` y `>` en un comando de shell.
 > Los checkpoints de SB3 pueden contener objetos Python serializados. Cargá sólo modelos que
 > generaste vos o cuya fuente confiás; `--trust-model` hace explícita esa decisión.
 
-`--agent-view` abre una segunda ventana centrada en el Polites. Proyecta exactamente los cinco
-valores que recibe la política: posición global del Polites, posición global del recurso y
-distancia. También conserva los valores normalizados crudos para auditar la proyección. No es
-una cámara ni una visualización de niebla de guerra: el experimento M0 entrega las coordenadas
-globales del árbol al agente.
+`--agent-view` abre una segunda ventana centrada en el Polites. El círculo representa su rango
+físico de visión de 32 m: el árbol aparece en el canvas solamente cuando entra en ese rango.
+Debajo del canvas se conservan los cinco valores normalizados que recibe la política y una
+advertencia explícita: M0 todavía entrega las coordenadas globales del árbol aunque esté fuera
+de la visión física. Es una vista de rango local para este mapa abierto, no una simulación de
+oclusiones o niebla de guerra.
 
 Opciones de `rl.eval`:
 
@@ -70,7 +71,7 @@ Opciones de `rl.eval`:
 |------|----------|
 | `--mode configured\|stochastic\|deterministic\|both` | por defecto respeta `evaluation.deterministic`; `both` compara ambos modos |
 | `--delay 0.5` | pausa (seg) entre decisiones; con `--agent-view`, pausa antes de ejecutar la acción |
-| `--agent-view` | abre la vista local del Polites con la observación exacta de la política |
+| `--agent-view` | abre la vista física de 32 m y audita por separado el input omnisciente de la política |
 | `--verbose` | imprime paso a paso (observación, target, distancia, reward) |
 | `--episodes N` | cuántos episodios correr (default 10) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |

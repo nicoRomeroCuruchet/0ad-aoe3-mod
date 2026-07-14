@@ -9,6 +9,10 @@ GATHER_OBSERVATION_LABELS = (
     "distance_norm",
 )
 
+# Mirrors Vision/Range inherited by units/athenai/polites from the 0 A.D.
+# public template template_unit_support_female_citizen.
+POLITES_VISION_RADIUS_M = 32.0
+
 
 def xz(pos):
     """0 A.D. position() ya devuelve [x, z] en metros (2 elementos)."""
