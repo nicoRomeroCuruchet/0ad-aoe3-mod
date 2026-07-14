@@ -34,6 +34,19 @@ Or enable it from the in-game menu: **Settings → Mod Selection → aoe3**.
 
 Then start a match and select **Athenians** as your civilization.
 
+### Repo-local AppImage
+
+For a downloaded Linux AppImage, keep the large binary untracked at
+`.runtime/0ad/0ad.AppImage` and launch it through the repo wrapper:
+
+```bash
+./run_game.sh
+```
+
+The wrapper registers this checkout as the `aoe3` user mod and normalizes the
+0 A.D. data directory. This avoids Snap-launched terminals making the game look
+for mods under a Snap-specific `XDG_DATA_HOME`.
+
 For full build-from-source instructions see [MANUAL.md](MANUAL.md).
 
 ---
