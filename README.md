@@ -54,19 +54,24 @@ For full build-from-source instructions see [MANUAL.md](MANUAL.md).
 ### Standard RL environment
 
 The reinforcement-learning code uses a reproducible repo-level Python environment. With
-[`uv`](https://docs.astral.sh/uv/) installed, one command creates `.venv/`, installs Python
-3.11 when needed, and syncs the exact versions from `uv.lock`:
+[`uv`](https://docs.astral.sh/uv/) and `make` installed, one command creates `.venv/`, installs
+Python 3.11 when needed, and syncs the exact versions from `uv.lock`:
 
 ```bash
-uv sync --locked
+make setup
 ```
 
-Run tools through that environment without activating it manually:
+Use the short, versioned project commands without activating the environment manually:
 
 ```bash
-uv run pytest --cov
-uv run python -m rl.eval --experiment rl/configs/m0_oracle.toml
+make help
+make test
+make oracle
 ```
+
+The Makefile is only a thin interface: `make setup` runs `uv sync --locked`, and the other
+targets run their Python tools through `uv run`. For an interactive terminal, you can instead
+run `source .venv/bin/activate` once and then use `python`, `pytest`, and `ruff` directly.
 
 See [rl/README.md](rl/README.md) for the live 0 A.D. server, training, evaluation, and custom
 agent workflow.

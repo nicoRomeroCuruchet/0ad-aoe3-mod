@@ -14,24 +14,26 @@ regenerables, no se versionan, y ahora quedan aislados por corrida en `rl/runs/`
 > **Reglas de oro:**
 > 1. Todos los comandos se corren **desde la raíz del repo** (donde está la carpeta `rl/`),
 >    si no, los `import rl.*` fallan.
-> 2. Usá `uv run ...`: el repo fija Python 3.11 y todas las dependencias en `uv.lock`.
+> 2. Usá los comandos `make`: el repo fija Python 3.11 y todas las dependencias en `uv.lock`.
 > 3. Mantené abierto el proceso de 0 A.D. mientras entrenás o evaluás.
 
 ### Paso 0 — Instalar dependencias (una sola vez)
 
 ```bash
 cd /ruta/al/0ad-aoe3-mod
-uv sync --locked
+make setup
 ```
 
 Eso crea `.venv/` con Python 3.11, SAC/SB3, PyTorch CPU y el cliente `zero_ad` fijado al
 commit oficial de 0 A.D. Release 28. `pyproject.toml` declara las dependencias y `uv.lock`
 fija las versiones y hashes exactos. Esos dos archivos son la única fuente de dependencias.
+`make setup` es un wrapper corto de `uv sync --locked`; corré `make help` para listar todos
+los comandos disponibles.
 
 ### Paso 1 — Arrancar el server de 0 A.D. (Terminal 1)
 
 ```bash
-./run_game.sh --rl-interface=127.0.0.1:6000
+make server
 ```
 Esperá hasta que imprima **`RL interface listening on 127.0.0.1:6000`** (se abre la ventana
 del juego). Dejá esta terminal abierta. `Ctrl+C` para detener el server.
@@ -39,16 +41,15 @@ del juego). Dejá esta terminal abierta. `Ctrl+C` para detener el server.
 ### Paso 2 — Correr la política / evaluar (Terminal 2)
 
 ```bash
-uv run python -m rl.eval --experiment rl/configs/m0_oracle.toml \
-  --mode deterministic --delay 0.4 --verbose
+make oracle ARGS="--mode deterministic --delay 0.4 --verbose"
 ```
 Esto ejecuta el **oracle** (baseline que apunta directamente a las coordenadas del recurso): el
 aldeano camina hacia el árbol en la ventana de 0 A.D. Para evaluar un modelo aprendido, indicá
 su experimento y checkpoint:
 
 ```bash
-uv run python -m rl.eval --experiment rl/configs/m0_sb3_sac.toml \
-  --model rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model --trust-model --mode both
+make eval MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
+  TRUST_MODEL=1 ARGS="--mode both"
 ```
 
 Reemplazá `REEMPLAZAR_CON_LA_CORRIDA` por el directorio exacto que imprime `rl.train`;
@@ -74,7 +75,7 @@ Opciones de `rl.eval`:
 ### Reentrenar (opcional)
 
 ```bash
-uv run python -m rl.train --experiment rl/configs/m0_sb3_sac.toml --timesteps 2000
+make train STEPS=2000
 ```
 
 Cada corrida crea una carpeta ignorada por git en `rl/runs/` con el modelo, la config resuelta,
@@ -86,17 +87,19 @@ el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente sal
 ### Correr los tests (no necesitan el juego)
 
 ```bash
-uv run pytest rl/tests/ -v
-# Con el umbral de cobertura del repo (mínimo 80%):
-uv run pytest --cov
+make test
+# Tests, lint, imports, dependencias y lockfile:
+make verify
 ```
 
 ### Si algo se traba
 
 ```bash
-pkill -9 -f pyrogenesis          # matar servers colgados (OJO: el proceso se llama 'main')
+pgrep -af 'pyrogenesis|0ad'      # buscá el PID exacto del server colgado
+kill 12345                       # reemplazá 12345 por ese PID; probá sin -KILL primero
 ```
-y relanzá el Paso 1. (Detalle en "Lecciones del server headless" más abajo.)
+Si no responde después de unos segundos, usá `kill -KILL 12345` con el mismo PID y relanzá el
+Paso 1. (Detalle en "Lecciones del server headless" más abajo.)
 
 ## Qué vas a ver
 
@@ -171,8 +174,8 @@ episodios y seeds.
 Para comprobar primero el pipeline y los dos extremos de referencia:
 
 ```bash
-uv run python -m rl.eval --experiment rl/configs/m0_random.toml --mode deterministic
-uv run python -m rl.eval --experiment rl/configs/m0_oracle.toml --mode deterministic
+make random ARGS="--mode deterministic"
+make oracle ARGS="--mode deterministic"
 ```
 
 El oracle **no aprende**: usa la posición del recurso presente en la observación y marca un techo
