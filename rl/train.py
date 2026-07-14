@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import platform
 from pathlib import Path
 from typing import Sequence
@@ -22,6 +23,12 @@ from rl.experiments.config import (
 from rl.experiments.environments import build_environment
 from rl.experiments.evaluation import evaluate
 from rl.experiments.training import train_policy
+from rl.gather.agent_view import (
+    AgentView,
+    AgentViewUnavailable,
+    make_agent_view_observer,
+    open_agent_view,
+)
 
 
 DEFAULT_EXPERIMENT = Path("rl/configs/m0_sb3_sac.toml")
@@ -31,6 +38,13 @@ def _positive_integer(value: str) -> int:
     parsed = int(value)
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _non_negative_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed) or parsed < 0:
+        raise argparse.ArgumentTypeError("must be finite and non-negative")
     return parsed
 
 
@@ -96,6 +110,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="allow --out to replace an existing checkpoint",
     )
     parser.add_argument(
+        "--agent-view",
+        action="store_true",
+        help=(
+            "show the exact Polites policy observation during post-training "
+            "evaluation"
+        ),
+    )
+    parser.add_argument(
+        "--delay",
+        type=_non_negative_float,
+        default=0.0,
+        help="seconds to hold each pre-action frame in --agent-view",
+    )
+    parser.add_argument(
         "--allow-remote-server",
         action="store_true",
         help=(
@@ -122,6 +150,8 @@ def _checkpoint_candidates(path: Path) -> tuple[Path, ...]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.delay and not args.agent_view:
+        parser.error("--delay requires --agent-view")
     loaded_config = load_experiment_config(args.experiment)
     config = apply_overrides(
         loaded_config,
@@ -146,6 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_remote=args.allow_remote_server,
     )
 
+    agent_view: AgentView | None = None
     try:
         policy = train_policy(config, env)
         model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -164,12 +195,22 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "status": "checkpoint_saved",
             },
         )
+        if args.agent_view:
+            try:
+                agent_view = open_agent_view(env)
+            except AgentViewUnavailable as error:
+                parser.error(str(error))
         report = evaluate(
             env,
             policy,
             episodes=config.evaluation.episodes,
             deterministic=config.evaluation.deterministic,
             seed=config.evaluation.seed,
+            decision_observer=(
+                None
+                if agent_view is None
+                else make_agent_view_observer(agent_view, delay=args.delay)
+            ),
         )
         record_evaluation(artifacts, report)
         record_run_context(
@@ -182,7 +223,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             },
         )
     finally:
-        _close_environment(env)
+        try:
+            if agent_view is not None:
+                agent_view.close()
+        finally:
+            _close_environment(env)
 
     print(f"run: {artifacts.run_dir}")
     print(f"modelo: {model_path}")

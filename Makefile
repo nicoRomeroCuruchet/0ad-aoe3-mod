@@ -7,6 +7,7 @@ override export EPISODES := $(value EPISODES)
 override export ARGS := $(value ARGS)
 override export MODEL := $(value MODEL)
 override export TRUST_MODEL := $(value TRUST_MODEL)
+override export NO_AGENT_VIEW := $(value NO_AGENT_VIEW)
 
 .DEFAULT_GOAL := help
 
@@ -22,7 +23,7 @@ help:
 		'  make server                        Start 0 A.D. with the RL interface' \
 		'  make oracle [EPISODES=…] [ARGS=…]  Evaluate the oracle baseline' \
 		'  make random [EPISODES=…] [ARGS=…]  Evaluate the random baseline' \
-		'  make train [STEPS=…] [ARGS=…]      Train SAC' \
+		'  make train [STEPS=…] [ARGS=…] [NO_AGENT_VIEW=1]  Train SAC' \
 		'  make eval MODEL=… TRUST_MODEL=1    Evaluate a trusted SAC checkpoint'
 
 setup:
@@ -66,14 +67,28 @@ random:
 
 train:
 	@steps="$${STEPS:-}"; \
+	no_agent_view="$${NO_AGENT_VIEW:-}"; \
 	if [[ -n "$$steps" && ! "$$steps" =~ ^[1-9][0-9]*$$ ]]; then \
 		printf '%s\n' 'STEPS must be a positive integer.' >&2; exit 2; \
 	fi; \
+	if [[ -n "$$no_agent_view" && "$$no_agent_view" != "1" ]]; then \
+		printf '%s\n' 'NO_AGENT_VIEW must be 1 when set.' >&2; exit 2; \
+	fi; \
 	read -r -a extra_args <<< "$${ARGS:-}"; \
+	if [[ "$$no_agent_view" == "1" ]]; then \
+		for arg in "$${extra_args[@]}"; do \
+			if [[ "$$arg" == "--agent-view" || "$$arg" == "--delay" || "$$arg" == --delay=* ]]; then \
+				printf '%s\n' 'ARGS cannot include --agent-view or --delay when NO_AGENT_VIEW=1.' >&2; \
+				exit 2; \
+			fi; \
+		done; \
+	fi; \
+	view_args=(--agent-view); \
+	if [[ "$$no_agent_view" == "1" ]]; then view_args=(); fi; \
 	step_args=(); \
 	if [[ -n "$$steps" ]]; then step_args=(--timesteps "$$steps"); fi; \
 	uv run --locked python -m rl.train --experiment rl/configs/m0_sb3_sac.toml \
-		"$${step_args[@]}" "$${extra_args[@]}"
+		"$${view_args[@]}" "$${step_args[@]}" "$${extra_args[@]}"
 
 eval:
 	@model="$${MODEL:-}"; \

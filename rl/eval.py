@@ -24,8 +24,6 @@ from rl.experiments.config import (
 )
 from rl.experiments.environments import build_environment
 from rl.experiments.evaluation import (
-    DecisionObserver,
-    DecisionRecord,
     EvaluationReport,
     StepObserver,
     StepRecord,
@@ -34,6 +32,7 @@ from rl.experiments.evaluation import (
 from rl.gather.agent_view import (
     AgentView,
     AgentViewUnavailable,
+    make_agent_view_observer,
     open_agent_view,
 )
 from rl.gather.core import denormalize_action
@@ -129,21 +128,6 @@ def make_step_observer(
             f"    step {record.step:2d}: {observation_text} {target}{distance_text} "
             f"reward={record.reward:+.2f}"
         )
-
-    return observe
-
-
-def make_agent_view_observer(
-    agent_view: AgentView,
-    *,
-    delay: float,
-) -> DecisionObserver:
-    """Update the local view before advancing the environment."""
-
-    def observe(record: DecisionRecord) -> None:
-        agent_view.update(record)
-        if delay:
-            agent_view.pause(delay)
 
     return observe
 

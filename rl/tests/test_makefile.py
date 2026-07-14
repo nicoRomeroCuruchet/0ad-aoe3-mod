@@ -67,12 +67,48 @@ def test_make_agent_targets_forward_parameters(tmp_path):
     )
 
     assert oracle[-5:] == ["--episodes", "3", "--delay", "0.5", "--verbose"]
-    assert training[-4:] == ["--timesteps", "321", "--out", "/tmp/model"]
+    assert training[-5:] == [
+        "--agent-view",
+        "--timesteps",
+        "321",
+        "--out",
+        "/tmp/model",
+    ]
 
 
 def test_make_agent_targets_preserve_config_defaults(tmp_path):
     assert "--episodes" not in _run_with_fake_uv(tmp_path, "oracle")
     assert "--timesteps" not in _run_with_fake_uv(tmp_path, "train")
+
+
+def test_make_train_can_disable_the_default_agent_view(tmp_path):
+    training = _run_with_fake_uv(tmp_path, "train", "NO_AGENT_VIEW=1")
+
+    assert "--agent-view" not in training
+    assert "--delay" not in training
+
+
+def test_make_train_rejects_view_arguments_in_headless_mode(tmp_path):
+    environment, capture_path = _fake_uv_environment(tmp_path)
+
+    result = subprocess.run(
+        [
+            "make",
+            "--no-print-directory",
+            "train",
+            "NO_AGENT_VIEW=1",
+            "ARGS=--agent-view --delay 0.5",
+        ],
+        cwd=REPO_ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "cannot include --agent-view or --delay" in result.stderr
+    assert not capture_path.exists()
 
 
 def test_make_eval_requires_and_quotes_a_model_path(tmp_path):

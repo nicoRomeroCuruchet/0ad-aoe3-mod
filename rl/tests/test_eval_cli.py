@@ -5,7 +5,7 @@ import pytest
 
 import rl.eval as eval_cli
 from rl.agents.baselines import GatherOraclePolicy
-from rl.experiments.evaluation import StepRecord
+from rl.experiments.evaluation import DecisionRecord, StepRecord
 
 
 ORACLE_EXPERIMENT = """
@@ -194,7 +194,7 @@ def test_agent_view_observer_updates_before_pre_action_delay():
     events = []
     agent_view = FakeAgentView(events)
     observer = eval_cli.make_agent_view_observer(agent_view, delay=0.2)
-    decision = eval_cli.DecisionRecord(
+    decision = DecisionRecord(
         episode=0,
         step=0,
         observation=np.zeros(5, dtype=np.float32),
@@ -211,7 +211,7 @@ def test_agent_view_observer_updates_before_pre_action_delay():
 def test_agent_view_observer_runs_without_delay():
     agent_view = FakeAgentView()
     observer = eval_cli.make_agent_view_observer(agent_view, delay=0.0)
-    decision = eval_cli.DecisionRecord(
+    decision = DecisionRecord(
         episode=0,
         step=0,
         observation=np.zeros(5, dtype=np.float32),

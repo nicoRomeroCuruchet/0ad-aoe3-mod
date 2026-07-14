@@ -6,7 +6,7 @@ import pytest
 
 import rl.train as train_cli
 from rl.agents.base import EpisodeResult
-from rl.experiments.evaluation import EvaluationReport
+from rl.experiments.evaluation import DecisionRecord, EvaluationReport
 
 
 EXPERIMENT = """
@@ -44,6 +44,25 @@ class CloseableEnv:
         self.closed = True
 
 
+class FakeAgentView:
+    def __init__(self, events, *, close_error=None):
+        self.events = events
+        self.close_error = close_error
+        self.closed = False
+
+    def update(self, record):
+        self.events.append(("view", record))
+
+    def pause(self, delay):
+        self.events.append(("pause", delay))
+
+    def close(self):
+        self.events.append("close_view")
+        self.closed = True
+        if self.close_error is not None:
+            raise self.close_error
+
+
 def completed_report():
     return EvaluationReport(
         episodes=(
@@ -79,6 +98,12 @@ def test_apply_overrides_returns_a_new_validated_config(tmp_path: Path):
     assert updated.training.total_steps == 12
     assert original.environment.parameters["uri"] == "http://localhost:6000"
     assert original.training.total_steps == 5000
+
+
+@pytest.mark.parametrize("delay", ["-0.1", "nan", "inf", "-inf"])
+def test_parser_rejects_invalid_agent_view_delays(delay):
+    with pytest.raises(SystemExit):
+        train_cli.build_parser().parse_args(["--delay", delay])
 
 
 def test_main_runs_configured_training_records_artifacts_and_closes_env(
@@ -136,6 +161,7 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
     assert calls["config"].training.total_steps == 12
     assert calls["saved"][2] == run_directories[0] / "model"
     assert calls["environment"][1] == {"allow_remote": True}
+    assert calls["evaluation"][2]["decision_observer"] is None
     assert events == ["train", "save", "evaluate"]
     assert env.closed is True
 
@@ -157,6 +183,7 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
 ):
     env = CloseableEnv()
     events = []
+    agent_view = FakeAgentView(events)
     monkeypatch.setattr(
         train_cli,
         "build_environment",
@@ -172,6 +199,11 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
         "save_policy",
         lambda agent, policy, path: events.append("save"),
     )
+    monkeypatch.setattr(
+        train_cli,
+        "open_agent_view",
+        lambda selected_env: events.append("open_view") or agent_view,
+    )
 
     def fail_evaluation(env, policy, **kwargs):
         events.append("evaluate")
@@ -186,13 +218,170 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
                 str(write_experiment(tmp_path)),
                 "--run-root",
                 str(tmp_path / "runs"),
+                "--agent-view",
             ]
         )
 
-    assert events == ["train", "save", "evaluate"]
+    assert events == ["train", "save", "open_view", "evaluate", "close_view"]
+    assert agent_view.closed is True
     assert env.closed is True
     run_directory = next((tmp_path / "runs").iterdir())
     assert (run_directory / "resolved_config.json").is_file()
+    metadata = json.loads((run_directory / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "checkpoint_saved"
+    assert not (run_directory / "metrics.json").exists()
+
+
+def test_main_shows_and_paces_the_post_training_evaluation(
+    tmp_path: Path,
+    monkeypatch,
+):
+    env = CloseableEnv()
+    events = []
+    agent_view = FakeAgentView(events)
+    opened_for = []
+    monkeypatch.setattr(
+        train_cli,
+        "build_environment",
+        lambda config, **kwargs: env,
+    )
+    monkeypatch.setattr(
+        train_cli,
+        "train_policy",
+        lambda config, selected_env: events.append("train") or ConstantPolicy(),
+    )
+    monkeypatch.setattr(
+        train_cli,
+        "save_policy",
+        lambda agent, policy, path: events.append("save"),
+    )
+    monkeypatch.setattr(
+        train_cli,
+        "open_agent_view",
+        lambda selected_env: (
+            opened_for.append(selected_env)
+            or events.append("open_view")
+            or agent_view
+        ),
+    )
+
+    def fake_evaluate(selected_env, policy, **kwargs):
+        events.append("evaluate")
+        kwargs["decision_observer"](
+            DecisionRecord(
+                episode=0,
+                step=0,
+                observation=np.zeros(5, dtype=np.float32),
+                action=np.zeros(2, dtype=np.float32),
+            )
+        )
+        return completed_report()
+
+    monkeypatch.setattr(train_cli, "evaluate", fake_evaluate)
+
+    exit_code = train_cli.main(
+        [
+            "--experiment",
+            str(write_experiment(tmp_path)),
+            "--run-root",
+            str(tmp_path / "runs"),
+            "--agent-view",
+            "--delay",
+            "0.5",
+        ]
+    )
+
+    assert exit_code == 0
+    assert opened_for == [env]
+    assert events[:4] == ["train", "save", "open_view", "evaluate"]
+    assert events[4][0] == "view"
+    assert events[5] == ("pause", 0.5)
+    assert events[6] == "close_view"
+    assert agent_view.closed is True
+    assert env.closed is True
+
+
+def test_main_closes_the_environment_when_agent_view_close_fails(
+    tmp_path: Path,
+    monkeypatch,
+):
+    env = CloseableEnv()
+    agent_view = FakeAgentView([], close_error=RuntimeError("close failed"))
+    monkeypatch.setattr(train_cli, "build_environment", lambda config, **kwargs: env)
+    monkeypatch.setattr(
+        train_cli,
+        "train_policy",
+        lambda config, selected_env: ConstantPolicy(),
+    )
+    monkeypatch.setattr(train_cli, "save_policy", lambda agent, policy, path: None)
+    monkeypatch.setattr(train_cli, "open_agent_view", lambda selected_env: agent_view)
+    monkeypatch.setattr(
+        train_cli,
+        "evaluate",
+        lambda env, policy, **kwargs: completed_report(),
+    )
+
+    with pytest.raises(RuntimeError, match="close failed"):
+        train_cli.main(
+            [
+                "--experiment",
+                str(write_experiment(tmp_path)),
+                "--run-root",
+                str(tmp_path / "runs"),
+                "--agent-view",
+            ]
+        )
+
+    assert agent_view.closed is True
+    assert env.closed is True
+
+
+def test_main_preserves_the_checkpoint_when_agent_view_cannot_open(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    env = CloseableEnv()
+    events = []
+    monkeypatch.setattr(train_cli, "build_environment", lambda config, **kwargs: env)
+    monkeypatch.setattr(
+        train_cli,
+        "train_policy",
+        lambda config, selected_env: events.append("train") or ConstantPolicy(),
+    )
+    monkeypatch.setattr(
+        train_cli,
+        "save_policy",
+        lambda agent, policy, path: events.append("save"),
+    )
+
+    def fail_to_open(selected_env):
+        events.append("open_view")
+        raise train_cli.AgentViewUnavailable("no graphical display")
+
+    monkeypatch.setattr(train_cli, "open_agent_view", fail_to_open)
+    monkeypatch.setattr(
+        train_cli,
+        "evaluate",
+        lambda env, policy, **kwargs: (_ for _ in ()).throw(AssertionError),
+    )
+
+    with pytest.raises(SystemExit) as error:
+        train_cli.main(
+            [
+                "--experiment",
+                str(write_experiment(tmp_path)),
+                "--run-root",
+                str(tmp_path / "runs"),
+                "--agent-view",
+            ]
+        )
+
+    assert error.value.code == 2
+    assert "no graphical display" in capsys.readouterr().err
+    assert events == ["train", "save", "open_view"]
+    assert env.closed is True
+    run_directory = next((tmp_path / "runs").iterdir())
     metadata = json.loads((run_directory / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["status"] == "checkpoint_saved"
     assert not (run_directory / "metrics.json").exists()

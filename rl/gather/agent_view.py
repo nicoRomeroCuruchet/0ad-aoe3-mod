@@ -9,7 +9,7 @@ from typing import Any, Protocol
 
 import numpy as np
 
-from rl.experiments.evaluation import DecisionRecord
+from rl.experiments.evaluation import DecisionObserver, DecisionRecord
 
 from .core import GATHER_OBSERVATION_LABELS, denormalize_action
 
@@ -26,6 +26,21 @@ class AgentView(Protocol):
     def pause(self, delay: float) -> None: ...
 
     def close(self) -> None: ...
+
+
+def make_agent_view_observer(
+    agent_view: AgentView,
+    *,
+    delay: float,
+) -> DecisionObserver:
+    """Update the local view before advancing the environment."""
+
+    def observe(record: DecisionRecord) -> None:
+        agent_view.update(record)
+        if delay:
+            agent_view.pause(delay)
+
+    return observe
 
 
 @dataclass(frozen=True, slots=True)
