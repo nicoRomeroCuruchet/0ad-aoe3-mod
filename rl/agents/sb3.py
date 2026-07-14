@@ -22,7 +22,7 @@ def _load_sac_class() -> type[Any]:
     except ModuleNotFoundError as error:
         raise SB3DependencyError(
             "Stable-Baselines3 is required for 'sb3_sac'; "
-            "install rl/requirements.txt before using this agent",
+            "run 'uv sync --locked' before using this agent",
         ) from error
     return module.SAC
 

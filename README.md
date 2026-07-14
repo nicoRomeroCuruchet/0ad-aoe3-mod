@@ -51,6 +51,26 @@ set `OAD_SDL_VIDEODRIVER=wayland` to opt back into native Wayland.
 
 For full build-from-source instructions see [MANUAL.md](MANUAL.md).
 
+### Standard RL environment
+
+The reinforcement-learning code uses a reproducible repo-level Python environment. With
+[`uv`](https://docs.astral.sh/uv/) installed, one command creates `.venv/`, installs Python
+3.11 when needed, and syncs the exact versions from `uv.lock`:
+
+```bash
+uv sync --locked
+```
+
+Run tools through that environment without activating it manually:
+
+```bash
+uv run pytest --cov
+uv run python -m rl.eval --experiment rl/configs/m0_oracle.toml
+```
+
+See [rl/README.md](rl/README.md) for the live 0 A.D. server, training, evaluation, and custom
+agent workflow.
+
 ---
 
 ## Features

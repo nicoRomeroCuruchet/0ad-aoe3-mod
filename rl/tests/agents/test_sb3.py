@@ -115,5 +115,5 @@ def test_missing_stable_baselines_dependency_has_an_actionable_error(monkeypatch
 
     monkeypatch.setattr("rl.agents.sb3.import_module", fail_import)
 
-    with pytest.raises(SB3DependencyError, match="rl/requirements.txt"):
+    with pytest.raises(SB3DependencyError, match="uv sync --locked"):
         load_sb3_sac_policy("model")

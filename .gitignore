@@ -22,6 +22,7 @@ cache/
 .runtime/
 
 # Python test and coverage artifacts
+.venv/
 .coverage
 htmlcov/
 .pytest_cache/

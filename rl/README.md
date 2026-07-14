@@ -13,48 +13,46 @@ regenerables, no se versionan, y ahora quedan aislados por corrida en `rl/runs/`
 
 > **Reglas de oro:**
 > 1. Todos los comandos se corren **desde la raíz del repo** (donde está la carpeta `rl/`),
->    si no, los `import rl.*` fallan: `cd ~/dev/research/0ad-aoe3-mod`
-> 2. Siempre usá el **Python 3.11** standalone (no el del sistema):
->    `~/Documents/0ad/.toolchain/python/bin/python3`
-> 3. **Un server = un cliente.** El server se cierra cuando el cliente (eval/train) se
->    desconecta → relanzá `run_server.sh` para cada corrida.
+>    si no, los `import rl.*` fallan.
+> 2. Usá `uv run ...`: el repo fija Python 3.11 y todas las dependencias en `uv.lock`.
+> 3. Mantené abierto el proceso de 0 A.D. mientras entrenás o evaluás.
 
 ### Paso 0 — Instalar dependencias (una sola vez)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m pip install -r rl/requirements.txt
-$PY -m pip install ~/Documents/0ad/source/tools/rlclient/python   # cliente zero_ad
+cd /ruta/al/0ad-aoe3-mod
+uv sync --locked
 ```
 
-> Si `~/Documents/0ad/.toolchain` no existe, recrealo según `MANUAL.md` (Python 3.11 efímero),
-> o usá cualquier otro Python 3.11 con esas deps.
+Eso crea `.venv/` con Python 3.11, SAC/SB3, PyTorch CPU y el cliente `zero_ad` fijado al
+commit oficial de 0 A.D. Release 28. `pyproject.toml` declara las dependencias y `uv.lock`
+fija las versiones y hashes exactos. Esos dos archivos son la única fuente de dependencias.
 
 ### Paso 1 — Arrancar el server de 0 A.D. (Terminal 1)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-bash rl/run_server.sh
+./run_game.sh --rl-interface=127.0.0.1:6000
 ```
-Esperá hasta que imprima **`Server RL listo en 127.0.0.1:6000`** (se abre la ventana del juego).
-Dejá esta terminal abierta. `Ctrl+C` para detener el server.
+Esperá hasta que imprima **`RL interface listening on 127.0.0.1:6000`** (se abre la ventana
+del juego). Dejá esta terminal abierta. `Ctrl+C` para detener el server.
 
 ### Paso 2 — Correr la política / evaluar (Terminal 2)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m rl.eval --experiment rl/configs/m0_oracle.toml --mode deterministic --delay 0.4 --verbose
+uv run python -m rl.eval --experiment rl/configs/m0_oracle.toml \
+  --mode deterministic --delay 0.4 --verbose
 ```
 Esto ejecuta el **oracle** (baseline que apunta directamente a las coordenadas del recurso): el
 aldeano camina hacia el árbol en la ventana de 0 A.D. Para evaluar un modelo aprendido, indicá
 su experimento y checkpoint:
 
 ```bash
-$PY -m rl.eval --experiment rl/configs/m0_sb3_sac.toml \
-  --model rl/runs/<corrida>/model --trust-model --mode both
+uv run python -m rl.eval --experiment rl/configs/m0_sb3_sac.toml \
+  --model rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model --trust-model --mode both
 ```
+
+Reemplazá `REEMPLAZAR_CON_LA_CORRIDA` por el directorio exacto que imprime `rl.train`;
+no copies los caracteres `<` y `>` en un comando de shell.
 
 > Los checkpoints de SB3 pueden contener objetos Python serializados. Cargá sólo modelos que
 > generaste vos o cuya fuente confiás; `--trust-model` hace explícita esa decisión.
@@ -76,9 +74,7 @@ Opciones de `rl.eval`:
 ### Reentrenar (opcional)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod          # con el server del Paso 1 corriendo
-PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m rl.train --experiment rl/configs/m0_sb3_sac.toml --timesteps 2000
+uv run python -m rl.train --experiment rl/configs/m0_sb3_sac.toml --timesteps 2000
 ```
 
 Cada corrida crea una carpeta ignorada por git en `rl/runs/` con el modelo, la config resuelta,
@@ -90,10 +86,9 @@ el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente sal
 ### Correr los tests (no necesitan el juego)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-~/Documents/0ad/.toolchain/python/bin/python3 -m pytest rl/tests/ -v
+uv run pytest rl/tests/ -v
 # Con el umbral de cobertura del repo (mínimo 80%):
-~/Documents/0ad/.toolchain/python/bin/python3 -m pytest --cov
+uv run pytest --cov
 ```
 
 ### Si algo se traba
@@ -127,7 +122,7 @@ Con `--mode both --verbose`:
 | `gather/core.py` | Funciones puras (geometría, normalización, observación, reward) — con tests |
 | `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad`, con backend inyectable |
 | `train.py`, `eval.py` | CLIs finas: parsean opciones y delegan a los módulos anteriores |
-| `run_server.sh` | Lanza 0 A.D. headless con la interfaz RL de forma confiable |
+| `../run_game.sh`, `run_server.sh` | Lanzadores RL para AppImage y build desde source |
 | `reset_config.json` | Config de la partida (mapa `random/rl_gather`, civ athenai, 1 jugador) |
 | `tests/` | Contratos unitarios/integración offline; no necesitan el juego ni `zero_ad` |
 
@@ -176,9 +171,8 @@ episodios y seeds.
 Para comprobar primero el pipeline y los dos extremos de referencia:
 
 ```bash
-$PY -m rl.eval --experiment rl/configs/m0_random.toml --mode deterministic
-# relanzar el server (un server = un cliente)
-$PY -m rl.eval --experiment rl/configs/m0_oracle.toml --mode deterministic
+uv run python -m rl.eval --experiment rl/configs/m0_random.toml --mode deterministic
+uv run python -m rl.eval --experiment rl/configs/m0_oracle.toml --mode deterministic
 ```
 
 El oracle **no aprende**: usa la posición del recurso presente en la observación y marca un techo
@@ -199,7 +193,7 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 
 | Ya hecho (no lo toquen, reúsenlo) | Dónde |
 |---|---|
-| Lanzar 0 A.D. headless de forma confiable | `run_server.sh` |
+| Lanzar 0 A.D. con la interfaz RL | `../run_game.sh --rl-interface=127.0.0.1:6000` |
 | Entorno Gym (`reset`/`step`/obs/acción) | `gather/env.py` (lo **extienden**, no lo reescriben) |
 | Orquestación de entrenamiento + evaluación | `experiments/training.py`, `experiments/evaluation.py` |
 | Conexión al motor y acciones (`walk`/`gather`/…) | cliente `zero_ad` |
