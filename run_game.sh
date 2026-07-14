@@ -13,6 +13,9 @@ fi
 # Snap-launched terminals can leak a Snap-specific XDG_DATA_HOME. Pin the
 # normal user data directory so 0 A.D. finds the same mod on every launch.
 export XDG_DATA_HOME="${OAD_XDG_DATA_HOME:-$HOME/.local/share}"
+# The Release 28 AppImage can render an invisible cursor through native
+# Wayland. XWayland keeps SDL mouse rendering reliable on GNOME Wayland.
+export SDL_VIDEODRIVER="${OAD_SDL_VIDEODRIVER:-x11}"
 MODS_DIR="$XDG_DATA_HOME/0ad/mods"
 MOD_LINK="$MODS_DIR/aoe3"
 mkdir -p "$MODS_DIR"

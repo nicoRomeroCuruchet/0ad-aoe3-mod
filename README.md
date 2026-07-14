@@ -45,7 +45,9 @@ For a downloaded Linux AppImage, keep the large binary untracked at
 
 The wrapper registers this checkout as the `aoe3` user mod and normalizes the
 0 A.D. data directory. This avoids Snap-launched terminals making the game look
-for mods under a Snap-specific `XDG_DATA_HOME`.
+for mods under a Snap-specific `XDG_DATA_HOME`. On GNOME Wayland it also uses
+XWayland by default to avoid an invisible cursor in the Release 28 AppImage;
+set `OAD_SDL_VIDEODRIVER=wayland` to opt back into native Wayland.
 
 For full build-from-source instructions see [MANUAL.md](MANUAL.md).
 
