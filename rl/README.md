@@ -41,7 +41,7 @@ del juego). Dejá esta terminal abierta. `Ctrl+C` para detener el server.
 ### Paso 2 — Correr la política / evaluar (Terminal 2)
 
 ```bash
-make oracle ARGS="--mode deterministic --delay 0.4 --verbose"
+make oracle EPISODES=1 ARGS="--mode deterministic --delay 0.5 --agent-view --verbose"
 ```
 Esto ejecuta el **oracle** (baseline que apunta directamente a las coordenadas del recurso): el
 aldeano camina hacia el árbol en la ventana de 0 A.D. Para evaluar un modelo aprendido, indicá
@@ -58,13 +58,20 @@ no copies los caracteres `<` y `>` en un comando de shell.
 > Los checkpoints de SB3 pueden contener objetos Python serializados. Cargá sólo modelos que
 > generaste vos o cuya fuente confiás; `--trust-model` hace explícita esa decisión.
 
+`--agent-view` abre una segunda ventana centrada en el Polites. Proyecta exactamente los cinco
+valores que recibe la política: posición global del Polites, posición global del recurso y
+distancia. También conserva los valores normalizados crudos para auditar la proyección. No es
+una cámara ni una visualización de niebla de guerra: el experimento M0 entrega las coordenadas
+globales del árbol al agente.
+
 Opciones de `rl.eval`:
 
 | Flag | Para qué |
 |------|----------|
 | `--mode configured\|stochastic\|deterministic\|both` | por defecto respeta `evaluation.deterministic`; `both` compara ambos modos |
-| `--delay 0.4` | pausa (seg) entre pasos, para **seguir la partida con el ojo** |
-| `--verbose` | imprime paso a paso (target, distancia, reward) |
+| `--delay 0.5` | pausa (seg) entre decisiones; con `--agent-view`, pausa antes de ejecutar la acción |
+| `--agent-view` | abre la vista local del Polites con la observación exacta de la política |
+| `--verbose` | imprime paso a paso (observación, target, distancia, reward) |
 | `--episodes N` | cuántos episodios correr (default 10) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
 | `--experiment rl/configs/...toml` | entorno, agente, seeds e hiperparámetros |
@@ -124,6 +131,7 @@ Con `--mode both --verbose`:
 | `configs/` | Experimentos versionados y comparables |
 | `gather/core.py` | Funciones puras (geometría, normalización, observación, reward) — con tests |
 | `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad`, con backend inyectable |
+| `gather/agent_view.py` | Ventana debug opcional de la observación local proyectada |
 | `train.py`, `eval.py` | CLIs finas: parsean opciones y delegan a los módulos anteriores |
 | `../run_game.sh`, `run_server.sh` | Lanzadores RL para AppImage y build desde source |
 | `reset_config.json` | Config de la partida (mapa `random/rl_gather`, civ athenai, 1 jugador) |

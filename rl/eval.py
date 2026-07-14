@@ -24,10 +24,17 @@ from rl.experiments.config import (
 )
 from rl.experiments.environments import build_environment
 from rl.experiments.evaluation import (
+    DecisionObserver,
+    DecisionRecord,
     EvaluationReport,
     StepObserver,
     StepRecord,
     evaluate,
+)
+from rl.gather.agent_view import (
+    AgentView,
+    AgentViewUnavailable,
+    open_agent_view,
 )
 from rl.gather.core import denormalize_action
 
@@ -126,6 +133,21 @@ def make_step_observer(
     return observe
 
 
+def make_agent_view_observer(
+    agent_view: AgentView,
+    *,
+    delay: float,
+) -> DecisionObserver:
+    """Update the local view before advancing the environment."""
+
+    def observe(record: DecisionRecord) -> None:
+        agent_view.update(record)
+        if delay:
+            agent_view.pause(delay)
+
+    return observe
+
+
 def _print_report(report: EvaluationReport, mode_label: str) -> None:
     for result in report.episodes:
         distance = result.final_info.get("distance")
@@ -168,10 +190,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--verbose", action="store_true", help="print every step")
     parser.add_argument(
+        "--agent-view",
+        action="store_true",
+        help="open a Polites-centered window showing the exact policy observation",
+    )
+    parser.add_argument(
         "--delay",
         type=_non_negative_float,
         default=0.0,
-        help="seconds to pause after each environment step",
+        help=(
+            "seconds between decisions; with --agent-view, pause before the action"
+        ),
     )
     parser.add_argument(
         "--replay",
@@ -224,14 +253,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_remote=args.allow_remote_server,
     )
 
+    agent_view: AgentView | None = None
     try:
         if policy is None:
             policy = build_policy(config.agent, env, seed=config.evaluation.seed)
 
+        if args.agent_view:
+            try:
+                agent_view = open_agent_view(env)
+            except AgentViewUnavailable as error:
+                parser.error(str(error))
+
         observer = make_step_observer(
             env,
             verbose=args.verbose,
-            delay=args.delay,
+            delay=0.0 if agent_view is not None else args.delay,
+        )
+        decision_observer = (
+            None
+            if agent_view is None
+            else make_agent_view_observer(agent_view, delay=args.delay)
         )
         modes = []
         if args.mode == "configured":
@@ -251,11 +292,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                 episodes=config.evaluation.episodes,
                 deterministic=deterministic,
                 seed=config.evaluation.seed,
+                decision_observer=decision_observer,
                 observer=observer,
             )
             _print_report(report, label)
     finally:
-        _close_environment(env)
+        try:
+            if agent_view is not None:
+                agent_view.close()
+        finally:
+            _close_environment(env)
 
     return 0
 

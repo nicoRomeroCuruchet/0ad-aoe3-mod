@@ -57,6 +57,25 @@ class OneStepEnv:
         self.closed = True
 
 
+class FakeAgentView:
+    def __init__(self, events=None):
+        self.events = events
+        self.records = []
+        self.close_calls = 0
+
+    def update(self, record):
+        self.records.append(record)
+        if self.events is not None:
+            self.events.append(("view", record))
+
+    def pause(self, delay):
+        if self.events is not None:
+            self.events.append(("pause", delay))
+
+    def close(self):
+        self.close_calls += 1
+
+
 def write_experiment(tmp_path: Path, contents: str = ORACLE_EXPERIMENT) -> Path:
     path = tmp_path / "experiment.toml"
     path.write_text(contents, encoding="utf-8")
@@ -169,6 +188,107 @@ def test_verbose_observer_reports_denormalized_target_and_applies_delay(
     )
     assert "target=(384,128)" in output
     assert "dist=8.0" in output
+
+
+def test_agent_view_observer_updates_before_pre_action_delay():
+    events = []
+    agent_view = FakeAgentView(events)
+    observer = eval_cli.make_agent_view_observer(agent_view, delay=0.2)
+    decision = eval_cli.DecisionRecord(
+        episode=0,
+        step=0,
+        observation=np.zeros(5, dtype=np.float32),
+        action=np.zeros(2, dtype=np.float32),
+    )
+
+    observer(decision)
+
+    assert events[0][0] == "view"
+    assert events[0][1] is decision
+    assert events[1] == ("pause", 0.2)
+
+
+def test_agent_view_observer_runs_without_delay():
+    agent_view = FakeAgentView()
+    observer = eval_cli.make_agent_view_observer(agent_view, delay=0.0)
+    decision = eval_cli.DecisionRecord(
+        episode=0,
+        step=0,
+        observation=np.zeros(5, dtype=np.float32),
+        action=np.zeros(2, dtype=np.float32),
+    )
+
+    observer(decision)
+
+    assert agent_view.records == [decision]
+
+
+def test_main_opens_updates_and_closes_opt_in_agent_view(
+    tmp_path: Path,
+    monkeypatch,
+):
+    env = OneStepEnv()
+    agent_view = FakeAgentView()
+    opened_for = []
+    monkeypatch.setattr(eval_cli, "build_environment", lambda config, **kwargs: env)
+    monkeypatch.setattr(
+        eval_cli,
+        "open_agent_view",
+        lambda selected_env: opened_for.append(selected_env) or agent_view,
+    )
+
+    exit_code = eval_cli.main(
+        ["--experiment", str(write_experiment(tmp_path)), "--agent-view"]
+    )
+
+    assert exit_code == 0
+    assert opened_for == [env]
+    assert len(agent_view.records) == 1
+    assert agent_view.close_calls == 1
+    assert env.closed is True
+
+
+def test_main_closes_agent_view_when_evaluation_fails(tmp_path: Path, monkeypatch):
+    env = OneStepEnv()
+    agent_view = FakeAgentView()
+    monkeypatch.setattr(eval_cli, "build_environment", lambda config, **kwargs: env)
+    monkeypatch.setattr(eval_cli, "open_agent_view", lambda selected_env: agent_view)
+    monkeypatch.setattr(
+        eval_cli,
+        "evaluate",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("evaluation failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="evaluation failed"):
+        eval_cli.main(
+            ["--experiment", str(write_experiment(tmp_path)), "--agent-view"]
+        )
+
+    assert agent_view.close_calls == 1
+    assert env.closed is True
+
+
+def test_main_reports_agent_view_startup_failure_and_closes_env(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    env = OneStepEnv()
+    monkeypatch.setattr(eval_cli, "build_environment", lambda config, **kwargs: env)
+
+    def fail_to_open(selected_env):
+        raise eval_cli.AgentViewUnavailable("no graphical display")
+
+    monkeypatch.setattr(eval_cli, "open_agent_view", fail_to_open)
+
+    with pytest.raises(SystemExit) as error:
+        eval_cli.main(
+            ["--experiment", str(write_experiment(tmp_path)), "--agent-view"]
+        )
+
+    assert error.value.code == 2
+    assert "no graphical display" in capsys.readouterr().err
+    assert env.closed is True
 
 
 def test_learned_agent_without_model_has_an_actionable_cli_error(

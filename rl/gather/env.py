@@ -10,6 +10,7 @@ import numpy as np
 from gymnasium import spaces
 
 from .core import (
+    GATHER_OBSERVATION_LABELS,
     build_observation,
     denormalize_action,
     distance,
@@ -46,13 +47,7 @@ def _resolve_backend(uri: str, game: Any, actions: Any) -> tuple[Any, Any]:
 
 class ZeroADGatherEnv(gym.Env):
     metadata = {"render_modes": []}
-    observation_labels = (
-        "villager_x_norm",
-        "villager_z_norm",
-        "resource_x_norm",
-        "resource_z_norm",
-        "distance_norm",
-    )
+    observation_labels = GATHER_OBSERVATION_LABELS
 
     def __init__(
         self,

@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from rl.experiments.evaluation import (
+    DecisionRecord,
     EvaluationReport,
     StepRecord,
     evaluate,
@@ -122,6 +123,43 @@ def test_run_episode_emits_immutable_algorithm_independent_step_records():
 
     with pytest.raises(FrozenInstanceError):
         records[-1].step = 10
+
+
+def test_run_episode_emits_policy_decision_before_advancing_environment():
+    env = TwoStepEnv()
+    decisions = []
+
+    def observe_decision(record):
+        env.events.append(("decision", record.step))
+        decisions.append(record)
+
+    env.events = []
+    original_step = env.step
+
+    def ordered_step(action):
+        env.events.append(("step", env._step))
+        return original_step(action)
+
+    env.step = ordered_step
+    run_episode(
+        env,
+        RecordingPolicy(),
+        episode=2,
+        deterministic=True,
+        decision_observer=observe_decision,
+    )
+
+    assert env.events == [
+        ("decision", 0),
+        ("step", 0),
+        ("decision", 1),
+        ("step", 1),
+    ]
+    assert all(isinstance(record, DecisionRecord) for record in decisions)
+    np.testing.assert_array_equal(decisions[0].observation, np.array([0.0]))
+    np.testing.assert_array_equal(decisions[1].observation, np.array([1.0]))
+    assert decisions[-1].observation.flags.writeable is False
+    assert decisions[-1].action.flags.writeable is False
 
 
 def test_evaluate_returns_immutable_results_and_aggregates():

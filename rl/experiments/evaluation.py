@@ -26,6 +26,29 @@ class EvaluationEnv(Protocol):
     ) -> tuple[np.ndarray, float, bool, bool, Mapping[str, Any]]: ...
 
 
+def _frozen_array(value: object) -> np.ndarray:
+    frozen = np.asarray(value).copy()
+    frozen.setflags(write=False)
+    return frozen
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionRecord:
+    """The exact policy input and output before the environment advances."""
+
+    episode: int
+    step: int
+    observation: np.ndarray
+    action: np.ndarray
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "observation", _frozen_array(self.observation))
+        object.__setattr__(self, "action", _frozen_array(self.action))
+
+
+DecisionObserver = Callable[[DecisionRecord], None]
+
+
 @dataclass(frozen=True, slots=True)
 class StepRecord:
     """One immutable transition emitted for visualization or diagnostics."""
@@ -40,12 +63,8 @@ class StepRecord:
     info: Mapping[str, Any]
 
     def __post_init__(self) -> None:
-        frozen_observation = np.asarray(self.observation).copy()
-        frozen_observation.setflags(write=False)
-        frozen_action = np.asarray(self.action).copy()
-        frozen_action.setflags(write=False)
-        object.__setattr__(self, "observation", frozen_observation)
-        object.__setattr__(self, "action", frozen_action)
+        object.__setattr__(self, "observation", _frozen_array(self.observation))
+        object.__setattr__(self, "action", _frozen_array(self.action))
         object.__setattr__(self, "reward", float(self.reward))
         object.__setattr__(self, "info", _freeze_mapping(self.info))
 
@@ -93,6 +112,7 @@ def run_episode(
     episode: int,
     deterministic: bool,
     seed: int | None = None,
+    decision_observer: DecisionObserver | None = None,
     observer: StepObserver | None = None,
 ) -> EpisodeResult:
     """Run one episode and return its complete terminal summary."""
@@ -114,6 +134,15 @@ def run_episode(
             observation,
             deterministic=deterministic,
         )
+        if decision_observer is not None:
+            decision_observer(
+                DecisionRecord(
+                    episode=episode,
+                    step=steps,
+                    observation=policy_observation,
+                    action=action,
+                )
+            )
         observation, reward, terminated, truncated, final_info = env.step(action)
         if observer is not None:
             observer(
@@ -148,6 +177,7 @@ def evaluate(
     episodes: int,
     deterministic: bool,
     seed: int | None = None,
+    decision_observer: DecisionObserver | None = None,
     observer: StepObserver | None = None,
 ) -> EvaluationReport:
     """Evaluate one policy with consecutive, reproducible episode seeds."""
@@ -162,6 +192,7 @@ def evaluate(
             episode=episode,
             deterministic=deterministic,
             seed=None if seed is None else seed + episode,
+            decision_observer=decision_observer,
             observer=observer,
         )
         for episode in range(episodes)

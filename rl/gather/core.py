@@ -1,6 +1,15 @@
 import numpy as np
 
 
+GATHER_OBSERVATION_LABELS = (
+    "villager_x_norm",
+    "villager_z_norm",
+    "resource_x_norm",
+    "resource_z_norm",
+    "distance_norm",
+)
+
+
 def xz(pos):
     """0 A.D. position() ya devuelve [x, z] en metros (2 elementos)."""
     return (float(pos[0]), float(pos[1]))
