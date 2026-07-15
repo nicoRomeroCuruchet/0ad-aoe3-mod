@@ -34,7 +34,47 @@ Or enable it from the in-game menu: **Settings → Mod Selection → aoe3**.
 
 Then start a match and select **Athenians** as your civilization.
 
+### Repo-local AppImage
+
+For a downloaded Linux AppImage, keep the large binary untracked at
+`.runtime/0ad/0ad.AppImage` and launch it through the repo wrapper:
+
+```bash
+./run_game.sh
+```
+
+The wrapper registers this checkout as the `aoe3` user mod and normalizes the
+0 A.D. data directory. This avoids Snap-launched terminals making the game look
+for mods under a Snap-specific `XDG_DATA_HOME`. On GNOME Wayland it also uses
+XWayland by default to avoid an invisible cursor in the Release 28 AppImage;
+set `OAD_SDL_VIDEODRIVER=wayland` to opt back into native Wayland.
+
 For full build-from-source instructions see [MANUAL.md](MANUAL.md).
+
+### Standard RL environment
+
+The reinforcement-learning code uses a reproducible repo-level Python environment. With
+[`uv`](https://docs.astral.sh/uv/) and `make` installed, one command creates `.venv/`, installs
+Python 3.11 when needed, and syncs the exact versions from `uv.lock`:
+
+```bash
+make setup
+```
+
+Use the short, versioned project commands without activating the environment manually:
+
+```bash
+make help
+make test
+make oracle
+```
+
+The Makefile is only a thin interface: `make setup` runs `uv sync --locked`, and the other
+targets run their Python tools through `uv run`. For an interactive terminal, you can instead
+run `source .venv/bin/activate` once and then use `python`, `pytest`, and `ruff` directly.
+
+See [rl/README.md](rl/README.md) for the live 0 A.D. server, training, evaluation, and custom
+agent workflow.
 
 ---
 

@@ -2,7 +2,7 @@ Engine.LoadLibrary("rmgen");
 Engine.LoadLibrary("rmgen-common");
 
 // Mapa mínimo y DETERMINISTA para RL: 1 aldeano + 1 árbol, sin RNG.
-function* GenerateMap()
+export function* generateMap()
 {
 	const tGrass = "medit_grass_field";
 	globalThis.g_Map = new RandomMap(0, tGrass);
