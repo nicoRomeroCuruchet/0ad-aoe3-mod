@@ -203,7 +203,7 @@ def test_open_agent_view_preflights_engine_and_wires_frame_capture(monkeypatch):
     assert events == ["preflight", "tk", "view", "capture"]
 
 
-def test_tk_view_draws_engine_ppm_instead_of_schematic():
+def test_tk_view_draws_only_the_engine_ppm():
     calls = []
 
     class Tk:
@@ -229,12 +229,34 @@ def test_tk_view_draws_engine_ppm_instead_of_schematic():
 
     view._draw_engine_frame(frame)
 
+    assert view.WINDOW_WIDTH == view.CANVAS_SIZE == 512
+    assert view.WINDOW_HEIGHT == view.CANVAS_SIZE
     assert view._engine_photo == "engine-photo"
-    assert calls[0] == ("delete", "all")
-    assert calls[1] == ("photo", frame.ppm, "PPM")
-    assert calls[2] == (
-        "image",
-        view.CANVAS_SIZE / 2,
-        view.CANVAS_SIZE / 2,
-        {"image": "engine-photo"},
-    )
+    assert calls == [
+        ("delete", "all"),
+        ("photo", frame.ppm, "PPM"),
+        (
+            "image",
+            view.CANVAS_SIZE / 2,
+            view.CANVAS_SIZE / 2,
+            {"image": "engine-photo"},
+        ),
+    ]
+
+
+def test_tk_view_waiting_canvas_has_no_text():
+    calls = []
+
+    class Canvas:
+        def delete(self, tag):
+            calls.append(("delete", tag))
+
+        def create_text(self, *_args, **_kwargs):
+            calls.append(("text",))
+
+    view = _TkGatherAgentView.__new__(_TkGatherAgentView)
+    view._canvas = Canvas()
+
+    view._draw_waiting_frame()
+
+    assert calls == [("delete", "all")]

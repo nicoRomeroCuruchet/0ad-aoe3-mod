@@ -154,15 +154,11 @@ def format_policy_readout(scene: LocalObservationScene) -> str:
 class _TkGatherAgentView:
     """Engine-rendered LOS canvas driven synchronously by policy decisions."""
 
-    WINDOW_WIDTH = 600
-    WINDOW_HEIGHT = 790
-    CANVAS_SIZE = 520
+    WINDOW_WIDTH = 512
+    WINDOW_HEIGHT = 512
+    CANVAS_SIZE = 512
 
     BACKGROUND = "#171a16"
-    GRID = "#343c31"
-    TEXT = "#e8eadf"
-    MUTED = "#a8ae9d"
-    WARNING = "#e3b35b"
 
     def __init__(
         self,
@@ -180,7 +176,7 @@ class _TkGatherAgentView:
         self._closed = False
 
         self._root = root
-        self._root.title("Polites physical vision")
+        self._root.title("Polites POV")
         self._root.configure(background=self.BACKGROUND)
         self._root.geometry(f"{self.WINDOW_WIDTH}x{self.WINDOW_HEIGHT}+24+48")
         self._root.resizable(False, False)
@@ -190,82 +186,28 @@ class _TkGatherAgentView:
         except tk.TclError:
             pass
 
-        tk.Label(
-            self._root,
-            text="POLITES / ENGINE LOS VIEW",
-            background=self.BACKGROUND,
-            foreground=self.TEXT,
-            font=("DejaVu Sans", 16, "bold"),
-            anchor="w",
-        ).pack(fill="x", padx=30, pady=(22, 2))
-        tk.Label(
-            self._root,
-            text=(
-                "Actual 0 A.D. scene · live engine Vision range · "
-                "omniscient policy input disclosed below"
-            ),
-            background=self.BACKGROUND,
-            foreground=self.MUTED,
-            font=("DejaVu Sans", 9),
-            anchor="w",
-        ).pack(fill="x", padx=30, pady=(0, 14))
-
         self._canvas = tk.Canvas(
             self._root,
             width=self.CANVAS_SIZE,
             height=self.CANVAS_SIZE,
             background=self.BACKGROUND,
-            highlightbackground=self.GRID,
-            highlightthickness=1,
+            borderwidth=0,
+            highlightthickness=0,
         )
-        self._canvas.pack(padx=30)
-
-        self._metrics = tk.StringVar(value="Waiting for the first policy step…")
-        tk.Label(
-            self._root,
-            textvariable=self._metrics,
-            background=self.BACKGROUND,
-            foreground=self.TEXT,
-            font=("DejaVu Sans", 10),
-            justify="left",
-            anchor="w",
-        ).pack(fill="x", padx=30, pady=(14, 4))
-
-        self._raw_values = tk.StringVar(value="")
-        tk.Label(
-            self._root,
-            textvariable=self._raw_values,
-            background=self.BACKGROUND,
-            foreground=self.WARNING,
-            font=("DejaVu Sans Mono", 8),
-            justify="left",
-            anchor="w",
-            wraplength=self.CANVAS_SIZE,
-        ).pack(fill="x", padx=30)
+        self._canvas.pack()
 
         self._draw_waiting_frame()
         self._pump_events()
 
     def _draw_waiting_frame(self) -> None:
         self._canvas.delete("all")
-        center = self.CANVAS_SIZE / 2.0
-        self._canvas.create_text(
-            center,
-            center,
-            text="Waiting for the first engine frame…",
-            fill=self.MUTED,
-            anchor="center",
-            font=("DejaVu Sans", 10),
-        )
 
-    def _draw_scene(self, scene: LocalObservationScene, record: DecisionRecord) -> None:
+    def _draw_scene(
+        self,
+        _scene: LocalObservationScene,
+        _record: DecisionRecord,
+    ) -> None:
         self._draw_engine_frame(self._frame_provider())
-
-        self._metrics.set(
-            f"episode {record.episode + 1}  ·  step {record.step}\n"
-            "engine view: actual Player 1 LOS · renderer is visibility authority"
-        )
-        self._raw_values.set(format_policy_readout(scene))
 
     def _draw_engine_frame(self, frame: EngineObserverFrame) -> None:
         """Display the exact scene/LOS frame produced by the 0 A.D. renderer."""
@@ -274,14 +216,6 @@ class _TkGatherAgentView:
         self._engine_photo = self._tk.PhotoImage(data=frame.ppm, format="PPM")
         center = self.CANVAS_SIZE / 2.0
         self._canvas.create_image(center, center, image=self._engine_photo)
-        self._canvas.create_text(
-            12,
-            12,
-            text="ENGINE RENDER · PLAYER 1 LOS",
-            fill=self.TEXT,
-            anchor="nw",
-            font=("DejaVu Sans", 8, "bold"),
-        )
 
     def _pump_events(self) -> bool:
         if self._closed:
