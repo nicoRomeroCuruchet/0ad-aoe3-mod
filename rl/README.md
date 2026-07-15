@@ -30,9 +30,10 @@ fija las versiones y hashes exactos. Esos dos archivos son la única fuente de d
 `make setup` es un wrapper corto de `uv sync --locked`; corré `make help` para listar todos
 los comandos disponibles.
 
-### Paso 1 — Arrancar el server de 0 A.D. (Terminal 1)
+### Paso 1 — Construir y arrancar el server de 0 A.D. (Terminal 1)
 
 ```bash
+make engine-observer  # sólo la primera vez; compila 0 A.D. Release 28
 make server
 ```
 Esperá hasta que imprima **`RL interface listening on 127.0.0.1:6000`** (se abre la ventana
@@ -58,12 +59,18 @@ no copies los caracteres `<` y `>` en un comando de shell.
 > Los checkpoints de SB3 pueden contener objetos Python serializados. Cargá sólo modelos que
 > generaste vos o cuya fuente confiás; `--trust-model` hace explícita esa decisión.
 
-`--agent-view` abre una segunda ventana centrada en el Polites. El círculo representa su rango
-físico de visión de 32 m: el árbol aparece en el canvas solamente cuando entra en ese rango.
-Debajo del canvas se conservan los cinco valores normalizados que recibe la política y una
+`--agent-view` abre una segunda ventana centrada en el Polites. La imagen viene directamente del
+renderer de 0 A.D.: muestra el terreno, los modelos, las animaciones y la niebla de guerra que ve
+el Player 1, usando el rango vivo del componente `Vision` del aldeano. No mueve la cámara principal.
+Debajo de la imagen se conservan los cinco valores normalizados que recibe la política y una
 advertencia explícita: M0 todavía entrega las coordenadas globales del árbol aunque esté fuera
-de la visión física. Es una vista de rango local para este mapa abierto, no una simulación de
-oclusiones o niebla de guerra.
+de la visión física. Esos píxeles son sólo para depuración; la política M0 no los consume.
+
+La primera compilación con `make engine-observer` tarda, ocupa aproximadamente 7 GB y queda en
+`.runtime/0ad-observer/`. En Ubuntu, instalá `libenet-dev` si el builder lo pide. Este build de
+visualización omite audio, lobby y Atlas. El observer usa el backend OpenGL de Release 28;
+mantené visible la ventana del juego y con un tamaño de por lo menos 512×512 mientras uses
+`--agent-view`.
 
 Opciones de `rl.eval`:
 
@@ -71,7 +78,7 @@ Opciones de `rl.eval`:
 |------|----------|
 | `--mode configured\|stochastic\|deterministic\|both` | por defecto respeta `evaluation.deterministic`; `both` compara ambos modos |
 | `--delay 0.5` | pausa (seg) entre decisiones; con `--agent-view`, pausa antes de ejecutar la acción |
-| `--agent-view` | abre la vista física de 32 m y audita por separado el input omnisciente de la política |
+| `--agent-view` | abre el render real del LOS del Polites y audita aparte el input omnisciente de la política |
 | `--verbose` | imprime paso a paso (observación, target, distancia, reward) |
 | `--episodes N` | cuántos episodios correr (default 10) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
@@ -138,9 +145,11 @@ Con `--mode both --verbose`:
 | `configs/` | Experimentos versionados y comparables |
 | `gather/core.py` | Funciones puras (geometría, normalización, observación, reward) — con tests |
 | `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad`, con backend inyectable |
-| `gather/agent_view.py` | Ventana debug opcional de la observación local proyectada |
+| `gather/agent_view.py` | Ventana debug opcional con el frame real producido por el engine |
+| `gather/engine_observer.py` | Cliente y validación del endpoint de frames PPM del engine |
 | `train.py`, `eval.py` | CLIs finas: parsean opciones y delegan a los módulos anteriores |
 | `../run_game.sh`, `run_server.sh` | Lanzadores RL para AppImage y build desde source |
+| `../engine/` | Patch versionado de Release 28 y builder del observer renderizado |
 | `reset_config.json` | Config de la partida (mapa `random/rl_gather`, civ athenai, 1 jugador) |
 | `tests/` | Contratos unitarios/integración offline; no necesitan el juego ni `zero_ad` |
 
@@ -211,7 +220,7 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 
 | Ya hecho (no lo toquen, reúsenlo) | Dónde |
 |---|---|
-| Lanzar 0 A.D. con la interfaz RL | `../run_game.sh --rl-interface=127.0.0.1:6000` |
+| Lanzar 0 A.D. con la interfaz RL | `make engine-observer` una vez; después `make server` |
 | Entorno Gym (`reset`/`step`/obs/acción) | `gather/env.py` (lo **extienden**, no lo reescriben) |
 | Orquestación de entrenamiento + evaluación | `experiments/training.py`, `experiments/evaluation.py` |
 | Conexión al motor y acciones (`walk`/`gather`/…) | cliente `zero_ad` |

@@ -69,6 +69,22 @@ make test
 make oracle
 ```
 
+The optional RL debug window uses a small, versioned engine patch so it can show the real
+0 A.D. terrain, models, animation, and Player 1 line of sight instead of a schematic. Build it
+once, then start the RL server:
+
+```bash
+make engine-observer
+make server
+```
+
+The builder downloads and verifies the official 0 A.D. Release 28 build source under the ignored
+`.runtime/` directory. The launcher reuses the art data from `.runtime/0ad/0ad.AppImage`, so it
+does not create another full copy of the public mod assets. On Ubuntu, install `libenet-dev` if
+the builder reports that it is missing. Allow roughly 7 GB for the source, local Rust toolchain,
+and build products. This observer build omits audio, the lobby, and Atlas because it is intended
+only for local RL visualization.
+
 The Makefile is only a thin interface: `make setup` runs `uv sync --locked`, and the other
 targets run their Python tools through `uv run`. For an interactive terminal, you can instead
 run `source .venv/bin/activate` once and then use `python`, `pytest`, and `ruff` directly.
@@ -125,6 +141,7 @@ Hoplites charge in phalanx (Othismos x2-3 damage)
 aoe3/
 ├── README.md              # This file
 ├── MANUAL.md              # Detailed setup + mechanics reference
+├── engine/                # Versioned Release 28 observer patch + build helper
 ├── mod.json               # Mod metadata
 ├── simulation/            # Game logic
 │   ├── components/        # Custom JS components (HoplitePhalanx, Stamina)
