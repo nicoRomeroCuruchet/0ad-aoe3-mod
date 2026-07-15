@@ -110,10 +110,10 @@ index f218c0f..1c66074 100644
  	void BeginFrame();
  	// signal frame end
 diff --git a/source/rlinterface/RLInterface.cpp b/source/rlinterface/RLInterface.cpp
-index a4328e1..bc8ebfe 100644
+index a4328e1..dd08518 100644
 --- a/source/rlinterface/RLInterface.cpp
 +++ b/source/rlinterface/RLInterface.cpp
-@@ -21,33 +21,98 @@
+@@ -21,33 +21,106 @@
  
  #include "rlinterface/RLInterface.h"
  
@@ -195,15 +195,23 @@ index a4328e1..bc8ebfe 100644
 +	std::ostringstream header;
 +	header << "P6\n" << OBSERVER_FRAME_SIZE << " " << OBSERVER_FRAME_SIZE << "\n255\n";
 +	std::string ppm = header.str();
-+	ppm.reserve(ppm.size() + bottomUpRGB.size());
++	const size_t headerSize = ppm.size();
++	ppm.resize(headerSize + bottomUpRGB.size());
 +
-+	const size_t rowSize = OBSERVER_FRAME_SIZE * 3;
 +	for (size_t row = 0; row < OBSERVER_FRAME_SIZE; ++row)
 +	{
 +		const size_t sourceRow = OBSERVER_FRAME_SIZE - row - 1;
-+		ppm.append(
-+			reinterpret_cast<const char*>(bottomUpRGB.data() + sourceRow * rowSize),
-+			rowSize);
++		for (size_t column = 0; column < OBSERVER_FRAME_SIZE; ++column)
++		{
++			const size_t sourceColumn = OBSERVER_FRAME_SIZE - column - 1;
++			const size_t sourcePixel =
++				(sourceRow * OBSERVER_FRAME_SIZE + sourceColumn) * 3;
++			const size_t targetPixel =
++				headerSize + (row * OBSERVER_FRAME_SIZE + column) * 3;
++			ppm[targetPixel] = static_cast<char>(bottomUpRGB[sourcePixel]);
++			ppm[targetPixel + 1] = static_cast<char>(bottomUpRGB[sourcePixel + 1]);
++			ppm[targetPixel + 2] = static_cast<char>(bottomUpRGB[sourcePixel + 2]);
++		}
 +	}
 +	return ppm;
 +}
@@ -212,7 +220,7 @@ index a4328e1..bc8ebfe 100644
  namespace RL
  {
  Interface::Interface(const char* server_address)
-@@ -101,6 +164,12 @@ std::string Interface::Evaluate(std::string&& code)
+@@ -101,6 +172,12 @@ std::string Interface::Evaluate(std::string&& code)
  	return SendGameMessage({ GameMessageType::Evaluate });
  }
  
@@ -225,7 +233,7 @@ index a4328e1..bc8ebfe 100644
  std::vector<std::string> Interface::GetTemplates(const std::vector<std::string>& names) const
  {
  	std::lock_guard<std::mutex> lock(m_Lock);
-@@ -146,6 +215,16 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -146,6 +223,16 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
  		"Game not running. Please create a scenario first.";
  
@@ -242,7 +250,7 @@ index a4328e1..bc8ebfe 100644
  	switch (event)
  	{
  	case MG_NEW_REQUEST:
-@@ -261,6 +340,40 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -261,6 +348,40 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  				stream << templateStr.c_str() << "\n";
  
  		}
@@ -283,7 +291,7 @@ index a4328e1..bc8ebfe 100644
  		else
  		{
  			mg_printf(conn, "%s", header404);
-@@ -438,11 +551,91 @@ void Interface::ApplyMessage(const GameMessage& msg)
+@@ -438,11 +559,91 @@ void Interface::ApplyMessage(const GameMessage& msg)
  			m_MsgLock.unlock();
  			break;
  		}

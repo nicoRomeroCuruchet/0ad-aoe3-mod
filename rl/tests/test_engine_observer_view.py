@@ -147,6 +147,30 @@ def test_engine_patch_uses_a_top_down_camera_scaled_to_live_vision():
     assert "SetOrthoProjection(" not in observer_camera
 
 
+def test_engine_patch_orients_observer_pixels_like_agent_coordinates():
+    patch = OBSERVER_PATCH.read_text()
+    encode_start = patch.index("std::string MakePPM")
+    encode_end = patch.index("return ppm;", encode_start)
+    encoder = patch[encode_start:encode_end]
+    render_start = patch.index("RenderObserverFrame")
+    readback = patch.index("RenderFrameForReadback(", render_start)
+    observer_camera = patch[render_start:readback]
+
+    # OpenGL supplies rows bottom-up, while the gather observation treats
+    # local +X as right and local +Z as down on screen.
+    assert "CVector3D(0.0f, 0.0f, -1.0f)" in observer_camera
+    assert "sourceRow = OBSERVER_FRAME_SIZE - row - 1" in encoder
+    assert "column < OBSERVER_FRAME_SIZE" in encoder
+    assert "sourceColumn = OBSERVER_FRAME_SIZE - column - 1" in encoder
+    assert (
+        "(sourceRow * OBSERVER_FRAME_SIZE + sourceColumn) * 3" in encoder
+    )
+    assert "ppm.resize(headerSize + bottomUpRGB.size())" in encoder
+    assert "targetPixel =" in encoder
+    assert "ppm[targetPixel + 2]" in encoder
+    assert "ppm.append(" not in encoder
+
+
 def test_observer_image_response_does_not_opt_into_browser_cors():
     patch = OBSERVER_PATCH.read_text()
     observe = patch.index('else if (uri == "/observe")')
