@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--agent-view",
         action="store_true",
-        help="show the exact Polites policy observation during training and evaluation",
+        help="show the engine-rendered Polites LOS during training and evaluation",
     )
     parser.add_argument(
         "--delay",

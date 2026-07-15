@@ -1,5 +1,6 @@
 import os
 import subprocess
+import time
 from pathlib import Path
 
 
@@ -24,6 +25,7 @@ def test_launcher_ignores_snap_xdg_data_home_and_registers_mod(tmp_path):
         "HOME": str(home),
         "XDG_DATA_HOME": str(home / "snap/code/current/.local/share"),
         "OAD_APPIMAGE": str(fake_appimage),
+        "OAD_OBSERVER_BINARY": str(tmp_path / "missing-pyrogenesis"),
         "CAPTURED_ENVIRONMENT": str(captured_environment),
     }
     environment.pop("OAD_XDG_DATA_HOME", None)
@@ -80,8 +82,7 @@ def test_launcher_allows_native_wayland_override(tmp_path):
     fake_appimage = tmp_path / "0ad.AppImage"
     captured_driver = tmp_path / "driver.txt"
     fake_appimage.write_text(
-        "#!/usr/bin/env bash\n"
-        'printf "%s\\n" "$SDL_VIDEODRIVER" > "$CAPTURED_DRIVER"\n',
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$SDL_VIDEODRIVER" > "$CAPTURED_DRIVER"\n',
         encoding="utf-8",
     )
     fake_appimage.chmod(0o755)
@@ -93,9 +94,195 @@ def test_launcher_allows_native_wayland_override(tmp_path):
             **os.environ,
             "HOME": str(home),
             "OAD_APPIMAGE": str(fake_appimage),
+            "OAD_OBSERVER_BINARY": str(tmp_path / "missing-pyrogenesis"),
             "OAD_SDL_VIDEODRIVER": "wayland",
             "CAPTURED_DRIVER": str(captured_driver),
         },
     )
 
     assert captured_driver.read_text(encoding="utf-8").strip() == "wayland"
+
+
+def test_launcher_uses_full_appimage_unless_observer_is_requested(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    selected_binary = tmp_path / "selected-binary.txt"
+    fake_appimage = tmp_path / "0ad.AppImage"
+    fake_appimage.write_text(
+        '#!/usr/bin/env bash\nprintf "appimage\\n" > "$SELECTED_BINARY"\n',
+        encoding="utf-8",
+    )
+    fake_appimage.chmod(0o755)
+    fake_observer = tmp_path / "pyrogenesis"
+    fake_observer.write_text(
+        '#!/usr/bin/env bash\nprintf "observer\\n" > "$SELECTED_BINARY"\n',
+        encoding="utf-8",
+    )
+    fake_observer.chmod(0o755)
+
+    subprocess.run(
+        [REPO_ROOT / "run_game.sh"],
+        check=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "OAD_APPIMAGE": str(fake_appimage),
+            "OAD_OBSERVER_BINARY": str(fake_observer),
+            "SELECTED_BINARY": str(selected_binary),
+        },
+    )
+
+    assert selected_binary.read_text(encoding="utf-8").strip() == "appimage"
+
+
+def test_launcher_requires_the_patched_binary_when_requested(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    fake_appimage = tmp_path / "0ad.AppImage"
+    fake_appimage.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_appimage.chmod(0o755)
+
+    result = subprocess.run(
+        [REPO_ROOT / "run_game.sh", "--require-rl-observer"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "OAD_APPIMAGE": str(fake_appimage),
+            "OAD_OBSERVER_BINARY": str(tmp_path / "missing-pyrogenesis"),
+        },
+    )
+
+    assert result.returncode != 0
+    assert "make engine-observer" in result.stderr
+
+
+def test_launcher_mounts_appimage_data_for_the_patched_binary(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    appdir = tmp_path / "appdir"
+    for relative in ("usr/data/config", "usr/data/mods/mod", "usr/data/mods/public"):
+        (appdir / relative).mkdir(parents=True)
+
+    fake_appimage = tmp_path / "0ad.AppImage"
+    fake_appimage.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "${1:-}" == "--appimage-mount" ]]; then\n'
+        '  printf "%s\\n" "$FAKE_APPDIR"\n'
+        "  sleep 30\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 9\n",
+        encoding="utf-8",
+    )
+    fake_appimage.chmod(0o755)
+
+    engine_root = tmp_path / "engine/binaries"
+    engine_binary = engine_root / "system/pyrogenesis"
+    engine_binary.parent.mkdir(parents=True)
+    captured_arguments = tmp_path / "engine-arguments.txt"
+    engine_binary.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$CAPTURED_ARGUMENTS"\n',
+        encoding="utf-8",
+    )
+    engine_binary.chmod(0o755)
+
+    subprocess.run(
+        [
+            REPO_ROOT / "run_game.sh",
+            "--require-rl-observer",
+            "--rl-interface=127.0.0.1:6000",
+        ],
+        check=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "OAD_APPIMAGE": str(fake_appimage),
+            "OAD_OBSERVER_BINARY": str(engine_binary),
+            "FAKE_APPDIR": str(appdir),
+            "CAPTURED_ARGUMENTS": str(captured_arguments),
+        },
+    )
+
+    assert captured_arguments.read_text(encoding="utf-8").splitlines() == [
+        "-mod=mod",
+        "-mod=public",
+        "-mod=aoe3",
+        "--rl-interface=127.0.0.1:6000",
+        "-conf=rendererbackend:gl",
+    ]
+    assert (engine_root / "data/config").resolve() == appdir / "usr/data/config"
+    assert (engine_root / "data/mods/mod").resolve() == appdir / "usr/data/mods/mod"
+    assert (
+        engine_root / "data/mods/public"
+    ).resolve() == appdir / "usr/data/mods/public"
+
+
+def test_launcher_rejects_a_second_observer_using_the_same_binary(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    appdir = tmp_path / "appdir"
+    for relative in ("usr/data/config", "usr/data/mods/mod", "usr/data/mods/public"):
+        (appdir / relative).mkdir(parents=True)
+
+    fake_appimage = tmp_path / "0ad.AppImage"
+    fake_appimage.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$FAKE_APPDIR"\nsleep 30\n',
+        encoding="utf-8",
+    )
+    fake_appimage.chmod(0o755)
+
+    engine_binary = tmp_path / "engine/binaries/system/pyrogenesis"
+    engine_binary.parent.mkdir(parents=True)
+    engine_binary.write_text(
+        "#!/usr/bin/env bash\n"
+        'if mkdir "$ENGINE_GATE" 2>/dev/null; then\n'
+        '  touch "$ENGINE_STARTED"\n'
+        '  while [[ ! -e "$RELEASE_ENGINE" ]]; do sleep 0.02; done\n'
+        '  rmdir "$ENGINE_GATE"\n'
+        "fi\n",
+        encoding="utf-8",
+    )
+    engine_binary.chmod(0o755)
+
+    engine_started = tmp_path / "engine-started"
+    release_engine = tmp_path / "release-engine"
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "OAD_APPIMAGE": str(fake_appimage),
+        "OAD_OBSERVER_BINARY": str(engine_binary),
+        "FAKE_APPDIR": str(appdir),
+        "ENGINE_GATE": str(tmp_path / "engine-gate"),
+        "ENGINE_STARTED": str(engine_started),
+        "RELEASE_ENGINE": str(release_engine),
+    }
+    first = subprocess.Popen(
+        [REPO_ROOT / "run_game.sh", "--require-rl-observer"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=environment,
+    )
+    try:
+        deadline = time.monotonic() + 3.0
+        while not engine_started.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert engine_started.exists()
+
+        second = subprocess.run(
+            [REPO_ROOT / "run_game.sh", "--require-rl-observer"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=3.0,
+            env=environment,
+        )
+
+        assert second.returncode != 0
+        assert "already running" in second.stderr
+    finally:
+        release_engine.touch()
+        first.communicate(timeout=3.0)

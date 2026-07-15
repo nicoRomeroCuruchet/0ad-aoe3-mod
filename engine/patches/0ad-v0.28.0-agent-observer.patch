@@ -1,0 +1,592 @@
+diff --git a/libraries/source/spidermonkey/build.sh b/libraries/source/spidermonkey/build.sh
+index 62716f5..c16ccbf 100755
+--- a/libraries/source/spidermonkey/build.sh
++++ b/libraries/source/spidermonkey/build.sh
+@@ -59,6 +59,10 @@ if [ -e .already-built ] && [ "$(cat .already-built || true)" = "${LIB_VERSION}"
+ fi
+ 
+ OS="${OS:=$(uname -s)}"
++BUILD_DEBUG=true
++if [ "${BUILD_RELEASE_ONLY:-0}" = "1" ]; then
++	BUILD_DEBUG=false
++fi
+ 
+ # fetch
+ # This tarball is built from https://ftp.mozilla.org/pub/firefox/releases/115.16.1esr/source/
+@@ -151,7 +155,7 @@ rm -Rf "${FOLDER}"
+ 
+ 	# Build
+ 	# Debug (broken on FreeBSD)
+-	if [ "${OS}" != "FreeBSD" ]; then
++	if [ "${BUILD_DEBUG}" = "true" ] && [ "${OS}" != "FreeBSD" ]; then
+ 		# shellcheck disable=SC2086
+ 		MOZCONFIG="$(pwd)/../mozconfig" \
+ 		MOZCONFIG_OPTIONS="${CONF_OPTS} \
+@@ -208,7 +212,7 @@ fi
+ mkdir include-release
+ cp -R -L "${FOLDER}"/build-release/dist/include/* include-release/
+ 
+-if [ "${OS}" != "FreeBSD" ]; then
++if [ "${BUILD_DEBUG}" = "true" ] && [ "${OS}" != "FreeBSD" ]; then
+ 	mkdir include-debug
+ 	cp -R -L "${FOLDER}"/build-debug/dist/include/* include-debug/
+ fi
+@@ -223,24 +227,27 @@ cp -L "${rust_path}" "lib/${LIB_PREFIX}${LIB_NAME}-rust${STATIC_LIB_SUFFIX}"
+ 
+ if [ "${OS}" = "Darwin" ]; then
+ 	# On MacOS, copy the static libraries only.
+-	cp -L "${FOLDER}/build-${DEB}/js/src/build/${LIB_PREFIX}js_static${LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}"
++	if [ "${BUILD_DEBUG}" = "true" ]; then
++		cp -L "${FOLDER}/build-${DEB}/js/src/build/${LIB_PREFIX}js_static${LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}"
++	fi
+ 	cp -L "${FOLDER}/build-${REL}/js/src/build/${LIB_PREFIX}js_static${LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${REL}${LIB_SUFFIX}"
+ elif [ "${OS}" = "Windows_NT" ]; then
+ 	# Windows needs DLLs to binaries/, static stubs to lib/ and debug symbols
+-	cp -L "${FOLDER}/build-${DEB}/dist/bin/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}" "bin/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}"
++	if [ "${BUILD_DEBUG}" = "true" ]; then
++		cp -L "${FOLDER}/build-${DEB}/dist/bin/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}" "bin/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}"
++		cp -L "${FOLDER}/build-${DEB}/js/src/build/${LIB_PREFIX}${LIB_NAME}-${DEB}${STATIC_LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${DEB}${STATIC_LIB_SUFFIX}"
++		cp -L "${FOLDER}/build-${DEB}/js/src/build/${LIB_PREFIX}${LIB_NAME}-${DEB}.pdb" "bin/${LIB_PREFIX}${LIB_NAME}-${DEB}.pdb"
++		# Copy the debug jsrust library.
++		rust_path="${FOLDER}/build-debug/$(grep jsrust "${FOLDER}/build-debug/js/src/build/backend.mk" | cut -d / -f 2-)"
++		cp -L "${rust_path}" "lib/${LIB_PREFIX}${LIB_NAME}-rust-debug${STATIC_LIB_SUFFIX}"
++	fi
+ 	cp -L "${FOLDER}/build-${REL}/dist/bin/${LIB_PREFIX}${LIB_NAME}-${REL}${LIB_SUFFIX}" "bin/${LIB_PREFIX}${LIB_NAME}-${REL}${LIB_SUFFIX}"
+-	cp -L "${FOLDER}/build-${DEB}/js/src/build/${LIB_PREFIX}${LIB_NAME}-${DEB}${STATIC_LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${DEB}${STATIC_LIB_SUFFIX}"
+ 	cp -L "${FOLDER}/build-${REL}/js/src/build/${LIB_PREFIX}${LIB_NAME}-${REL}${STATIC_LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${REL}${STATIC_LIB_SUFFIX}"
+-	# Copy debug symbols as well.
+-	cp -L "${FOLDER}/build-${DEB}/js/src/build/${LIB_PREFIX}${LIB_NAME}-${DEB}.pdb" "bin/${LIB_PREFIX}${LIB_NAME}-${DEB}.pdb"
+ 	cp -L "${FOLDER}/build-${REL}/js/src/build/${LIB_PREFIX}${LIB_NAME}-${REL}.pdb" "bin/${LIB_PREFIX}${LIB_NAME}-${REL}.pdb"
+-	# Copy the debug jsrust library.
+-	rust_path="${FOLDER}/build-debug/$(grep jsrust "${FOLDER}/build-debug/js/src/build/backend.mk" | cut -d / -f 2-)"
+-	cp -L "${rust_path}" "lib/${LIB_PREFIX}${LIB_NAME}-rust-debug${STATIC_LIB_SUFFIX}"
+ else
+ 	# Copy shared libs to lib/, they will also be copied to binaries/system, so the compiler and executable (resp.) can find them.
+ 	cp -L "${FOLDER}/build-${REL}/dist/bin/${LIB_PREFIX}${LIB_NAME}-${REL}${LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${REL}${LIB_SUFFIX}"
+-	if [ "${OS}" != "FreeBSD" ]; then
++	if [ "${BUILD_DEBUG}" = "true" ] && [ "${OS}" != "FreeBSD" ]; then
+ 		cp -L "${FOLDER}/build-${DEB}/dist/bin/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}"
+ 	fi
+ fi
+diff --git a/source/renderer/Renderer.cpp b/source/renderer/Renderer.cpp
+index fd1e2a9..1e0a739 100644
+--- a/source/renderer/Renderer.cpp
++++ b/source/renderer/Renderer.cpp
+@@ -501,6 +501,18 @@ void CRenderer::RenderFrame(const bool needsPresent)
+ 	}
+ }
+ 
++bool CRenderer::RenderFrameForReadback(
++	const uint32_t width, const uint32_t height, void* const data)
++{
++	if (!ShouldRender() || !data || !m->device->AcquireNextBackbuffer())
++		return false;
++
++	RenderFrameImpl(false, false);
++	m->deviceCommandContext->ReadbackFramebufferSync(0, 0, width, height, data);
++	m->deviceCommandContext->Flush();
++	return true;
++}
++
+ void CRenderer::RenderFrameImpl(const bool renderGUI, const bool renderLogger)
+ {
+ 	PROFILE3("render");
+diff --git a/source/renderer/Renderer.h b/source/renderer/Renderer.h
+index f218c0f..1c66074 100644
+--- a/source/renderer/Renderer.h
++++ b/source/renderer/Renderer.h
+@@ -92,6 +92,13 @@ public:
+ 
+ 	void RenderFrame(bool needsPresent);
+ 
++	/**
++	 * Render the scene without GUI and synchronously read the requested region
++	 * from the current backbuffer. This is intended for debug/observer tooling;
++	 * synchronous GPU readback is too expensive for normal rendering.
++	 */
++	bool RenderFrameForReadback(uint32_t width, uint32_t height, void* data);
++
+ 	// signal frame start
+ 	void BeginFrame();
+ 	// signal frame end
+diff --git a/source/rlinterface/RLInterface.cpp b/source/rlinterface/RLInterface.cpp
+index a4328e1..bc8ebfe 100644
+--- a/source/rlinterface/RLInterface.cpp
++++ b/source/rlinterface/RLInterface.cpp
+@@ -21,33 +21,98 @@
+ 
+ #include "rlinterface/RLInterface.h"
+ 
++#include "graphics/Camera.h"
++#include "graphics/GameView.h"
++#include "graphics/LOSTexture.h"
+ #include "gui/GUIManager.h"
+ #include "lib/debug.h"
+ #include "lib/types.h"
++#include "maths/FixedVector3D.h"
++#include "maths/Vector3D.h"
+ #include "ps/CLogger.h"
+ #include "ps/CStr.h"
+ #include "ps/Errors.h"
+ #include "ps/Game.h"
+ #include "ps/GameSetup/GameSetup.h"
+ #include "ps/Loader.h"
++#include "ps/VideoMode.h"
++#include "renderer/Renderer.h"
++#include "renderer/backend/Backend.h"
++#include "renderer/backend/IDevice.h"
++#include "renderer/RenderingOptions.h"
+ #include "scriptinterface/JSON.h"
+ #include "scriptinterface/Object.h"
+ #include "scriptinterface/ScriptInterface.h"
+ #include "scriptinterface/ScriptRequest.h"
+ #include "simulation2/Simulation2.h"
+ #include "simulation2/components/ICmpAIInterface.h"
++#include "simulation2/components/ICmpOwnership.h"
++#include "simulation2/components/ICmpPosition.h"
+ #include "simulation2/components/ICmpTemplateManager.h"
++#include "simulation2/components/ICmpVision.h"
+ #include "simulation2/system/Component.h"
+ #include "simulation2/system/LocalTurnManager.h"
+ #include "simulation2/system/TurnManager.h"
+ 
+ #include <cstdlib>
++#include <charconv>
++#include <cmath>
+ #include <js/RootingAPI.h>
+ #include <js/TypeDecls.h>
+ #include <js/Value.h>
+ #include <sstream>
++#include <system_error>
+ #include <utility>
+ 
++namespace
++{
++constexpr uint32_t OBSERVER_FRAME_SIZE = 512;
++constexpr float OBSERVER_CAMERA_HEIGHT = 512.0f;
++constexpr float OBSERVER_NEAR_PLANE = 1.0f;
++constexpr float OBSERVER_FAR_PLANE = 1024.0f;
++constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v1";
++
++bool ParseObserverEntity(const char* queryString, entity_id_t& entity)
++{
++	if (!queryString)
++		return false;
++
++	char value[32]{};
++	const size_t queryLength = strlen(queryString);
++	const int length = mg_get_var(
++		queryString, queryLength, "entity", value, sizeof(value));
++	if (length <= 0 || static_cast<size_t>(length) >= sizeof(value))
++		return false;
++
++	entity_id_t parsed = INVALID_ENTITY;
++	const auto result = std::from_chars(value, value + length, parsed);
++	if (result.ec != std::errc{} || result.ptr != value + length ||
++		parsed == INVALID_ENTITY)
++		return false;
++
++	entity = parsed;
++	return true;
++}
++
++std::string MakePPM(const std::vector<u8>& bottomUpRGB)
++{
++	std::ostringstream header;
++	header << "P6\n" << OBSERVER_FRAME_SIZE << " " << OBSERVER_FRAME_SIZE << "\n255\n";
++	std::string ppm = header.str();
++	ppm.reserve(ppm.size() + bottomUpRGB.size());
++
++	const size_t rowSize = OBSERVER_FRAME_SIZE * 3;
++	for (size_t row = 0; row < OBSERVER_FRAME_SIZE; ++row)
++	{
++		const size_t sourceRow = OBSERVER_FRAME_SIZE - row - 1;
++		ppm.append(
++			reinterpret_cast<const char*>(bottomUpRGB.data() + sourceRow * rowSize),
++			rowSize);
++	}
++	return ppm;
++}
++}
++
+ namespace RL
+ {
+ Interface::Interface(const char* server_address)
+@@ -101,6 +164,12 @@ std::string Interface::Evaluate(std::string&& code)
+ 	return SendGameMessage({ GameMessageType::Evaluate });
+ }
+ 
++std::string Interface::Observe(const entity_id_t entity)
++{
++	std::lock_guard<std::mutex> lock(m_Lock);
++	return SendGameMessage({GameMessageType::Observe, {}, entity});
++}
++
+ std::vector<std::string> Interface::GetTemplates(const std::vector<std::string>& names) const
+ {
+ 	std::lock_guard<std::mutex> lock(m_Lock);
+@@ -146,6 +215,16 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+ 		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+ 		"Game not running. Please create a scenario first.";
+ 
++	const char* invalidObserverEntity =
++		"HTTP/1.1 400 Bad Request\r\n"
++		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
++		"Observer requests require a valid owned entity ID.";
++
++	const char* observerUnavailable =
++		"HTTP/1.1 503 Service Unavailable\r\n"
++		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
++		"The engine observer is unavailable. Use the OpenGL renderer and keep the game window visible.";
++
+ 	switch (event)
+ 	{
+ 	case MG_NEW_REQUEST:
+@@ -261,6 +340,40 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+ 				stream << templateStr.c_str() << "\n";
+ 
+ 		}
++		else if (uri == "/observer/status")
++		{
++			stream << OBSERVER_PROTOCOL;
++		}
++		else if (uri == "/observe")
++		{
++			if (!interface->IsGameRunning())
++			{
++				mg_printf(conn, "%s", notRunningResponse);
++				return handled;
++			}
++
++			entity_id_t entity = INVALID_ENTITY;
++			if (!ParseObserverEntity(request_info->query_string, entity))
++			{
++				mg_printf(conn, "%s", invalidObserverEntity);
++				return handled;
++			}
++
++			const std::string frame = interface->Observe(entity);
++			if (frame.empty())
++			{
++				mg_printf(conn, "%s", observerUnavailable);
++				return handled;
++			}
++
++			mg_printf(conn,
++				"HTTP/1.1 200 OK\r\n"
++				"Content-Type: image/x-portable-pixmap\r\n"
++				"Content-Length: %zu\r\n\r\n",
++				frame.size());
++			mg_write(conn, frame.data(), frame.size());
++			return handled;
++		}
+ 		else
+ 		{
+ 			mg_printf(conn, "%s", header404);
+@@ -438,11 +551,91 @@ void Interface::ApplyMessage(const GameMessage& msg)
+ 			m_MsgLock.unlock();
+ 			break;
+ 		}
++		case GameMessageType::Observe:
++		{
++			m_ReturnValue = RenderObserverFrame(msg.observerEntity);
++			m_MsgApplied.notify_one();
++			m_MsgLock.unlock();
++			break;
++		}
+ 		default:
+ 		break;
+ 	}
+ }
+ 
++std::string Interface::RenderObserverFrame(const entity_id_t entity) const
++{
++	if (!g_Game || !g_Game->IsGameStarted() || !g_GUI)
++		return {};
++
++	const Renderer::Backend::Backend backend =
++		g_VideoMode.GetBackendDevice()->GetBackend();
++	if (backend != Renderer::Backend::Backend::GL &&
++		backend != Renderer::Backend::Backend::GL_ARB)
++		return {};
++
++	CSimulation2& simulation = *g_Game->GetSimulation2();
++	CmpPtr<ICmpPosition> cmpPosition(simulation, entity);
++	CmpPtr<ICmpOwnership> cmpOwnership(simulation, entity);
++	CmpPtr<ICmpVision> cmpVision(simulation, entity);
++	if (!cmpPosition || !cmpPosition->IsInWorld() || !cmpOwnership || !cmpVision ||
++		cmpOwnership->GetOwner() != g_Game->GetPlayerID())
++		return {};
++
++	const float visionRange = cmpVision->GetRange().ToFloat();
++	if (!(visionRange > 0.0f))
++		return {};
++
++	const CFixedVector3D fixedPosition = cmpPosition->GetPosition();
++	const CVector3D focus(
++		fixedPosition.X.ToFloat(), fixedPosition.Y.ToFloat(), fixedPosition.Z.ToFloat());
++
++	CCamera observerCamera;
++	observerCamera.SetViewPort({0, 0, OBSERVER_FRAME_SIZE, OBSERVER_FRAME_SIZE});
++	observerCamera.LookAt(
++		focus + CVector3D(0.0f, OBSERVER_CAMERA_HEIGHT, 0.0f),
++		focus,
++		CVector3D(0.0f, 0.0f, -1.0f));
++	observerCamera.SetPerspectiveProjection(
++		OBSERVER_NEAR_PLANE, OBSERVER_FAR_PLANE,
++		2.0f * std::atan(visionRange / OBSERVER_CAMERA_HEIGHT));
++	observerCamera.UpdateFrustum();
++
++	CGameView* const view = g_Game->GetView();
++	CCamera* const camera = view->GetCamera();
++	const CCamera normalCamera = *camera;
++	const player_id_t normalViewedPlayer = g_Game->GetViewedPlayerID();
++	const bool normalSmoothLOS = g_RenderingOptions.GetSmoothLOS();
++	const int normalWidth = g_Renderer.GetWidth();
++	const int normalHeight = g_Renderer.GetHeight();
++	if (normalWidth < static_cast<int>(OBSERVER_FRAME_SIZE) ||
++		normalHeight < static_cast<int>(OBSERVER_FRAME_SIZE))
++		return {};
++
++	g_RenderingOptions.SetSmoothLOS(false);
++	g_Game->SetViewedPlayerID(cmpOwnership->GetOwner());
++	view->GetLOSTexture().MakeDirty();
++	g_Renderer.Resize(OBSERVER_FRAME_SIZE, OBSERVER_FRAME_SIZE);
++	*camera = observerCamera;
++	std::vector<u8> rgb(OBSERVER_FRAME_SIZE * OBSERVER_FRAME_SIZE * 3);
++	const bool rendered = g_Renderer.RenderFrameForReadback(
++		OBSERVER_FRAME_SIZE, OBSERVER_FRAME_SIZE, rgb.data());
++	*camera = normalCamera;
++	g_Renderer.Resize(normalWidth, normalHeight);
++	g_RenderingOptions.SetSmoothLOS(normalSmoothLOS);
++	g_Game->SetViewedPlayerID(normalViewedPlayer);
++	view->GetLOSTexture().MakeDirty();
++	if (rendered)
++	{
++		// Release the acquired GL backbuffer only after repainting the normal
++		// view, so the observer camera never flashes in the game window.
++		g_Renderer.RenderFrame(false);
++		g_VideoMode.GetBackendDevice()->Present();
++	}
++
++	return rendered ? MakePPM(rgb) : std::string{};
++}
++
+ std::string Interface::GetGameState() const
+ {
+ 	const ScriptInterface& scriptInterface = g_Game->GetSimulation2()->GetScriptInterface();
+diff --git a/source/rlinterface/RLInterface.h b/source/rlinterface/RLInterface.h
+index 106a55c..805f0ec 100644
+--- a/source/rlinterface/RLInterface.h
++++ b/source/rlinterface/RLInterface.h
+@@ -20,6 +20,7 @@
+ 
+ #include "lib/code_annotation.h"
+ #include "simulation2/helpers/Player.h"
++#include "simulation2/system/Entity.h"
+ #include "third_party/mongoose/mongoose.h"
+ 
+ #include <condition_variable>
+@@ -51,6 +52,7 @@ enum class GameMessageType
+ 	Reset,
+ 	Commands,
+ 	Evaluate,
++	Observe,
+ };
+ 
+ /**
+@@ -60,6 +62,7 @@ struct GameMessage
+ {
+ 	GameMessageType type;
+ 	std::vector<GameCommand> commands;
++	entity_id_t observerEntity = INVALID_ENTITY;
+ };
+ 
+ struct SetupError : std::exception
+@@ -124,6 +127,11 @@ private:
+ 	 */
+ 	std::string Evaluate(std::string&& code);
+ 
++	/**
++	 * Render a player-LOS frame centered on an owned entity.
++	 */
++	std::string Observe(entity_id_t entity);
++
+ 	/**
+ 	 * @return template data for all templates of @param names.
+ 	 */
+@@ -159,6 +167,12 @@ private:
+ 	 */
+ 	std::string GetGameState() const;
+ 
++	/**
++	 * Render a top-down PPM frame on the main thread without moving the normal
++	 * game camera.
++	 */
++	std::string RenderObserverFrame(entity_id_t entity) const;
++
+ private:
+ 	GameMessage m_GameMessage{GameMessageType::None};
+ 	ScenarioConfig m_ScenarioConfig;
+diff --git a/source/scriptinterface/ModuleLoader.h b/source/scriptinterface/ModuleLoader.h
+index 3f7e470d..0cf4edcb 100644
+--- a/source/scriptinterface/ModuleLoader.h
++++ b/source/scriptinterface/ModuleLoader.h
+@@ -47,11 +47,30 @@ class ModuleLoader
+ public:
+ 	friend ScriptContext;
+ 
+-	class CompiledModule;
+ 	class Future;
+ 	class Result;
+ 
+ 	using AllowModuleFunc = std::function<bool(const VfsPath&)>;
++
++	class CompiledModule
++	{
++	public:
++		CompiledModule(const ScriptRequest& rq, const AllowModuleFunc& allowModule,
++			const VfsPath& filePath);
++
++		std::tuple<const std::vector<VfsPath>&,
++			const std::vector<std::reference_wrapper<Result>>&> GetRequesters() const;
++
++		void AddRequester(VfsPath importer);
++		void AddRequester(Result& callback);
++		void RemoveRequester(Result* toErase);
++
++		JS::PersistentRootedObject m_ModuleObject;
++	private:
++		std::vector<VfsPath> m_Importer;
++		std::vector<std::reference_wrapper<Result>> m_Callbacks;
++	};
++
+ 	using RegistryType = std::unordered_map<VfsPath, CompiledModule>;
+ 
+ 	ModuleLoader(AllowModuleFunc allowModule);
+@@ -86,24 +105,6 @@ private:
+ 	RegistryType m_Registry;
+ };
+ 
+-class ModuleLoader::CompiledModule
+-{
+-public:
+-	CompiledModule(const ScriptRequest& rq, const AllowModuleFunc& allowModule, const VfsPath& filePath);
+-
+-	std::tuple<const std::vector<VfsPath>&,
+-		const std::vector<std::reference_wrapper<Result>>&> GetRequesters() const;
+-
+-	void AddRequester(VfsPath importer);
+-	void AddRequester(Result& callback);
+-	void RemoveRequester(Result* toErase);
+-
+-	JS::PersistentRootedObject m_ModuleObject;
+-private:
+-	std::vector<VfsPath> m_Importer;
+-	std::vector<std::reference_wrapper<Result>> m_Callbacks;
+-};
+-
+ /**
+  * The future is fulfilled once the evaluation of the module
+  * completes.
+diff --git a/source/graphics/FontManager.h b/source/graphics/FontManager.h
+index 12f90a7a..d5b939bd 100644
+--- a/source/graphics/FontManager.h
++++ b/source/graphics/FontManager.h
+@@ -18,6 +18,7 @@
+ #ifndef INCLUDED_FONTMANAGER
+ #define INCLUDED_FONTMANAGER
+ 
++#include "graphics/Font.h"
+ #include "lib/code_annotation.h"
+ #include "ps/CStrIntern.h"
+ 
+@@ -28,7 +29,6 @@
+ #include <unordered_map>
+ 
+ class CConfigDBHook;
+-class CFont;
+ struct FT_LibraryRec_;
+ 
+ namespace Renderer::Backend { class IDeviceCommandContext; }
+diff --git a/source/graphics/MapGenerator.cpp b/source/graphics/MapGenerator.cpp
+index 4e7099f4..f1011e36 100644
+--- a/source/graphics/MapGenerator.cpp
++++ b/source/graphics/MapGenerator.cpp
+@@ -398,7 +398,7 @@ Script::StructuredClone RunMapGenerationScript(const StopToken stopToken, std::a
+ 	scriptInterface.GetContext().RunJobs();
+ 	auto& future = *compileResult.begin();
+ 	if (!future.IsDone())
+-		throw std::runtime_error{fmt::format("Loading module {:?} takes too long.", script.string8())};
++		throw std::runtime_error{fmt::format("Loading module '{}' takes too long.", script.string8())};
+ 
+ 	JS::RootedObject nsAsObject{rq.cx, future.Get()};
+ 
+@@ -414,7 +414,7 @@ Script::StructuredClone RunMapGenerationScript(const StopToken stopToken, std::a
+ 		if (!hasGenerator)
+ 		{
+ 			throw std::runtime_error{fmt::format(
+-				"The map generation script {:?} didn't export a {:?}.", script.string8(),
++				"The map generation script '{}' didn't export a '{}'.", script.string8(),
+ 				GENERATOR_NAME)};
+ 		}
+ 	}
+diff --git a/source/scriptinterface/FunctionWrapper.h b/source/scriptinterface/FunctionWrapper.h
+index 5e39d6a6..cb16390e 100644
+--- a/source/scriptinterface/FunctionWrapper.h
++++ b/source/scriptinterface/FunctionWrapper.h
+@@ -515,7 +515,7 @@ public:
+ 				flags))
+ 			{
+ 				throw std::runtime_error{fmt::format(
+-					"Failed defining function {:?} on the native scope.", classInfo->name)};
++					"Failed defining function '{}' on the native scope.", classInfo->name)};
+ 			}
+ 			JS::SetReservedSlot(functionObject, StatefullCallbackPrivateSlot::classInfo,
+ 				JS::PrivateValue(classInfo.release()));
+diff --git a/source/ps/GameSetup/HWDetect.cpp b/source/ps/GameSetup/HWDetect.cpp
+index 45911a28..e382bc2d 100644
+--- a/source/ps/GameSetup/HWDetect.cpp
++++ b/source/ps/GameSetup/HWDetect.cpp
+@@ -23,7 +23,9 @@
+ #include "lib/debug.h"
+ #include "lib/external_libraries/curl.h"
+ #include "lib/external_libraries/enet.h"
++#if CONFIG2_LOBBY
+ #include "lib/external_libraries/gloox.h"
++#endif
+ #include "lib/external_libraries/png.h"
+ #include "lib/external_libraries/libsdl.h"
+ #include "lib/path.h"
+@@ -209,7 +211,9 @@ void ReportLibraries(const ScriptRequest& rq, JS::HandleValue settings)
+ 	appendLibrary(LibraryReporter{rq, "boost"}.Add("version", BOOST_VERSION).MakeReport());
+ 	appendLibrary(LibraryReporter{rq, "enet"}.Add("version", std::to_string(ENET_VERSION)).MakeReport());
+ 	appendLibrary(LibraryReporter{rq, "fmt"}.Add("version", FMT_VERSION).MakeReport());
++#if CONFIG2_LOBBY
+ 	appendLibrary(LibraryReporter{rq, "gloox"}.Add("version", gloox_version()).MakeReport());
++#endif
+ 	appendLibrary(LibraryReporter{rq, "libicu"}.Add("version", U_ICU_VERSION).MakeReport());
+ 	appendLibrary(LibraryReporter{rq, "libcurl"}.Add("version", std::string(curl_version())).MakeReport());
+ #if CONFIG2_AUDIO
+diff --git a/source/graphics/TextRenderer.cpp b/source/graphics/TextRenderer.cpp
+index 7ddbcecd..3f3bcd47 100644
+--- a/source/graphics/TextRenderer.cpp
++++ b/source/graphics/TextRenderer.cpp
+@@ -217,7 +217,16 @@ void CTextRenderer::Render(
+ 
+ 	// Try to merge non-consecutive batches that share the same font/color/translate:
+ 	// sort the batch list by font, then merge the runs of adjacent compatible batches
+-	m_Batches.sort(SBatchCompare());
++	SBatchCompare compare;
++	for (auto next = m_Batches.begin(); next != m_Batches.end();)
++	{
++		auto current = next++;
++		auto insertion = m_Batches.begin();
++		while (insertion != current && !compare(*current, *insertion))
++			++insertion;
++		if (insertion != current)
++			m_Batches.splice(insertion, m_Batches, current);
++	}
+ 	for (SBatchList::iterator it = m_Batches.begin(); it != m_Batches.end(); )
+ 	{
+ 		SBatchList::iterator next = std::next(it);

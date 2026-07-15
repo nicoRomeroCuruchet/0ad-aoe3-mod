@@ -1,15 +1,19 @@
 import math
+import sys
+from types import ModuleType
 
 import numpy as np
 import pytest
 
 from rl.gather.agent_view import (
+    _TkGatherAgentView,
     AgentViewUnavailable,
     format_physical_status,
     format_policy_readout,
     open_agent_view,
     project_local_observation,
 )
+from rl.gather.engine_observer import EngineObserverFrame
 from rl.gather.core import (
     GATHER_OBSERVATION_LABELS,
     POLITES_VISION_RADIUS_M,
@@ -93,7 +97,8 @@ def test_policy_readout_discloses_omniscient_coordinates_outside_vision():
     readout = format_policy_readout(scene)
 
     assert "OMNISCIENT" in readout
-    assert "outside 32 m physical vision" in readout
+    assert "renderer frame above is the visibility authority" in readout
+    assert "outside 32 m physical vision" not in readout
     for label in GATHER_OBSERVATION_LABELS:
         assert label in readout
 
@@ -164,3 +169,72 @@ def test_open_agent_view_rejects_invalid_map_size_before_opening_tk(map_size_m):
 
     with pytest.raises(AgentViewUnavailable, match="valid map_size_m"):
         open_agent_view(env)
+
+
+def test_open_agent_view_preflights_engine_and_wires_frame_capture(monkeypatch):
+    events = []
+
+    class Observer:
+        def check_available(self):
+            events.append("preflight")
+
+    class GatherEnv:
+        observation_labels = GATHER_OBSERVATION_LABELS
+        map_size_m = 512.0
+        engine_observer = Observer()
+
+        def capture_agent_frame(self):
+            events.append("capture")
+
+    fake_tk = ModuleType("tkinter")
+    fake_tk.TclError = RuntimeError
+    fake_tk.Tk = lambda: events.append("tk") or object()
+    monkeypatch.setitem(sys.modules, "tkinter", fake_tk)
+
+    def make_view(_tk, _root, _map_size, _radius, frame_provider):
+        events.append("view")
+        frame_provider()
+        return object()
+
+    monkeypatch.setattr("rl.gather.agent_view._TkGatherAgentView", make_view)
+
+    open_agent_view(GatherEnv())
+
+    assert events == ["preflight", "tk", "view", "capture"]
+
+
+def test_tk_view_draws_engine_ppm_instead_of_schematic():
+    calls = []
+
+    class Tk:
+        @staticmethod
+        def PhotoImage(*, data, format):
+            calls.append(("photo", data, format))
+            return "engine-photo"
+
+    class Canvas:
+        def delete(self, tag):
+            calls.append(("delete", tag))
+
+        def create_image(self, x, y, **kwargs):
+            calls.append(("image", x, y, kwargs))
+
+        def create_text(self, x, y, **kwargs):
+            calls.append(("text", x, y, kwargs))
+
+    view = _TkGatherAgentView.__new__(_TkGatherAgentView)
+    view._tk = Tk()
+    view._canvas = Canvas()
+    frame = EngineObserverFrame(1, 1, b"P6\n1 1\n255\n\x00\x00\x00")
+
+    view._draw_engine_frame(frame)
+
+    assert view._engine_photo == "engine-photo"
+    assert calls[0] == ("delete", "all")
+    assert calls[1] == ("photo", frame.ppm, "PPM")
+    assert calls[2] == (
+        "image",
+        view.CANVAS_SIZE / 2,
+        view.CANVAS_SIZE / 2,
+        {"image": "engine-photo"},
+    )

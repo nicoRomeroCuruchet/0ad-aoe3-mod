@@ -11,7 +11,7 @@ override export NO_AGENT_VIEW := $(value NO_AGENT_VIEW)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test lint verify server oracle random train eval
+.PHONY: help setup test lint verify engine-observer server oracle random train eval
 
 help:
 	@printf '%s\n' \
@@ -20,6 +20,7 @@ help:
 		'  make test                          Run tests with coverage' \
 		'  make lint                          Run Ruff checks' \
 		'  make verify                        Run all offline quality gates' \
+		'  make engine-observer                Build patched 0 A.D. rendered-view engine' \
 		'  make server                        Start 0 A.D. with the RL interface' \
 		'  make oracle [EPISODES=…] [ARGS=…]  Evaluate the oracle baseline' \
 		'  make random [EPISODES=…] [ARGS=…]  Evaluate the random baseline' \
@@ -40,8 +41,11 @@ verify: test lint
 	uv pip check --python .venv/bin/python
 	uv lock --check
 
+engine-observer:
+	./engine/build_observer.sh
+
 server:
-	./run_game.sh --rl-interface=127.0.0.1:6000
+	./run_game.sh --require-rl-observer --rl-interface=127.0.0.1:6000
 
 oracle:
 	@episodes="$${EPISODES:-}"; \

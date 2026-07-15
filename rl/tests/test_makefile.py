@@ -23,8 +23,7 @@ def _fake_uv_environment(tmp_path: Path) -> tuple[dict[str, str], Path]:
     capture_path = tmp_path / "uv-arguments.txt"
     fake_uv = bin_dir / "uv"
     fake_uv.write_text(
-        "#!/bin/bash\n"
-        "printf '%s\\n' \"$@\" > \"$UV_CAPTURE\"\n",
+        '#!/bin/bash\nprintf \'%s\\n\' "$@" > "$UV_CAPTURE"\n',
         encoding="utf-8",
     )
     fake_uv.chmod(0o755)
@@ -53,9 +52,11 @@ def test_make_targets_are_thin_wrappers_around_the_canonical_tools():
     assert "uv sync --locked" in _make_dry_run("setup")
     assert "uv run --locked pytest --cov" in _make_dry_run("test")
     assert "uv run --locked ruff check rl" in _make_dry_run("lint")
-    assert "./run_game.sh --rl-interface=127.0.0.1:6000" in _make_dry_run(
-        "server"
+    assert (
+        "./run_game.sh --require-rl-observer --rl-interface=127.0.0.1:6000"
+        in _make_dry_run("server")
     )
+    assert "./engine/build_observer.sh" in _make_dry_run("engine-observer")
 
 
 def test_make_agent_targets_forward_parameters(tmp_path):

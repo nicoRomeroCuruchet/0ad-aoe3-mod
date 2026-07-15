@@ -1,11 +1,11 @@
-"""Tk debug window for Polites physical vision and the M0 policy input."""
+"""Tk window for engine-rendered Polites LOS and the M0 policy input."""
 
 from __future__ import annotations
 
 import math
 import time
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 import numpy as np
 
@@ -16,6 +16,7 @@ from .core import (
     POLITES_VISION_RADIUS_M,
     denormalize_action,
 )
+from .engine_observer import EngineObserverError, EngineObserverFrame
 
 
 class AgentViewUnavailable(RuntimeError):
@@ -119,10 +120,7 @@ def format_physical_status(scene: LocalObservationScene) -> str:
     """Describe only information available inside the physical vision panel."""
 
     if scene.visible_resource_local_m is None:
-        return (
-            "tree NOT VISIBLE · outside "
-            f"{scene.vision_radius_m:g} m physical vision"
-        )
+        return f"tree NOT VISIBLE · outside {scene.vision_radius_m:g} m physical vision"
     return (
         f"tree VISIBLE · local x={scene.resource_local_m[0]:+.1f} m  "
         f"z={scene.resource_local_m[1]:+.1f} m"
@@ -140,16 +138,10 @@ def format_policy_readout(scene: LocalObservationScene) -> str:
             strict=True,
         )
     )
-    if scene.visible_resource_local_m is None:
-        disclosure = (
-            "OMNISCIENT POLICY INPUT — tree coordinates remain available outside "
-            f"{scene.vision_radius_m:g} m physical vision."
-        )
-    else:
-        disclosure = (
-            "OMNISCIENT POLICY INPUT — tree coordinates are supplied regardless "
-            "of physical vision."
-        )
+    disclosure = (
+        "OMNISCIENT POLICY INPUT — tree coordinates are supplied regardless of "
+        "LOS; the renderer frame above is the visibility authority."
+    )
     return (
         f"{disclosure}\n"
         f"policy world target=({scene.resource_world_m[0]:.1f}, "
@@ -160,23 +152,17 @@ def format_policy_readout(scene: LocalObservationScene) -> str:
 
 
 class _TkGatherAgentView:
-    """Small physical-vision canvas driven synchronously by policy decisions."""
+    """Engine-rendered LOS canvas driven synchronously by policy decisions."""
 
     WINDOW_WIDTH = 600
     WINDOW_HEIGHT = 790
     CANVAS_SIZE = 520
-    CANVAS_MARGIN = 34
 
     BACKGROUND = "#171a16"
-    PANEL = "#20251e"
     GRID = "#343c31"
-    VISION_EDGE = "#e8eadf"
     TEXT = "#e8eadf"
     MUTED = "#a8ae9d"
     WARNING = "#e3b35b"
-    POLITES = "#57a6d9"
-    RESOURCE = "#8fbd63"
-    VECTOR = "#d7a64d"
 
     def __init__(
         self,
@@ -184,10 +170,13 @@ class _TkGatherAgentView:
         root: Any,
         map_size_m: float,
         vision_radius_m: float,
+        frame_provider: Callable[[], EngineObserverFrame],
     ):
         self._tk = tk
         self._map_size_m = _validated_map_size(map_size_m)
         self._radius_m = _validated_vision_radius(vision_radius_m)
+        self._frame_provider = frame_provider
+        self._engine_photo = None
         self._closed = False
 
         self._root = root
@@ -203,7 +192,7 @@ class _TkGatherAgentView:
 
         tk.Label(
             self._root,
-            text="POLITES / PHYSICAL VISION",
+            text="POLITES / ENGINE LOS VIEW",
             background=self.BACKGROUND,
             foreground=self.TEXT,
             font=("DejaVu Sans", 16, "bold"),
@@ -212,8 +201,8 @@ class _TkGatherAgentView:
         tk.Label(
             self._root,
             text=(
-                f"Circular {self._radius_m:g} m range view · omniscient policy "
-                "input disclosed below"
+                "Actual 0 A.D. scene · live engine Vision range · "
+                "omniscient policy input disclosed below"
             ),
             background=self.BACKGROUND,
             foreground=self.MUTED,
@@ -254,141 +243,45 @@ class _TkGatherAgentView:
             wraplength=self.CANVAS_SIZE,
         ).pack(fill="x", padx=30)
 
-        self._draw_grid()
+        self._draw_waiting_frame()
         self._pump_events()
 
-    def _canvas_point(self, local_x_m: float, local_z_m: float) -> tuple[float, float]:
-        center = self.CANVAS_SIZE / 2.0
-        extent = center - self.CANVAS_MARGIN
-        scale = extent / self._radius_m
-        return center + local_x_m * scale, center + local_z_m * scale
-
-    def _draw_grid(self) -> None:
+    def _draw_waiting_frame(self) -> None:
         self._canvas.delete("all")
         center = self.CANVAS_SIZE / 2.0
-        extent = center - self.CANVAS_MARGIN
-        self._canvas.create_oval(
-            center - extent,
-            center - extent,
-            center + extent,
-            center + extent,
-            fill=self.PANEL,
-            outline=self.VISION_EDGE,
-            width=2,
-        )
-        for fraction in (0.25, 0.5, 0.75):
-            radius = extent * fraction
-            self._canvas.create_oval(
-                center - radius,
-                center - radius,
-                center + radius,
-                center + radius,
-                outline=self.GRID,
-            )
-        self._canvas.create_line(
-            center - extent,
-            center,
-            center + extent,
-            center,
-            fill=self.GRID,
-        )
-        self._canvas.create_line(
-            center,
-            center - extent,
-            center,
-            center + extent,
-            fill=self.GRID,
-        )
         self._canvas.create_text(
-            self.CANVAS_SIZE - self.CANVAS_MARGIN,
-            center - 9,
-            text="+x",
+            center,
+            center,
+            text="Waiting for the first engine frame…",
             fill=self.MUTED,
-            anchor="e",
-            font=("DejaVu Sans", 8),
-        )
-        self._canvas.create_text(
-            center + 8,
-            self.CANVAS_SIZE - self.CANVAS_MARGIN,
-            text="+z",
-            fill=self.MUTED,
-            anchor="sw",
-            font=("DejaVu Sans", 8),
-        )
-        self._canvas.create_text(
-            self.CANVAS_MARGIN,
-            self.CANVAS_MARGIN - 10,
-            text=f"PHYSICAL VISION · radius {self._radius_m:g} m",
-            fill=self.VISION_EDGE,
-            anchor="w",
-            font=("DejaVu Sans", 8),
+            anchor="center",
+            font=("DejaVu Sans", 10),
         )
 
     def _draw_scene(self, scene: LocalObservationScene, record: DecisionRecord) -> None:
-        self._draw_grid()
-
-        center = self.CANVAS_SIZE / 2.0
-        if scene.visible_resource_local_m is not None:
-            resource_canvas_x, resource_canvas_y = self._canvas_point(
-                *scene.visible_resource_local_m,
-            )
-            self._canvas.create_line(
-                center,
-                center,
-                resource_canvas_x,
-                resource_canvas_y,
-                fill=self.VECTOR,
-                width=2,
-                dash=(6, 5),
-            )
-            self._canvas.create_rectangle(
-                resource_canvas_x - 3,
-                resource_canvas_y + 4,
-                resource_canvas_x + 3,
-                resource_canvas_y + 14,
-                fill="#725035",
-                outline="",
-            )
-            self._canvas.create_oval(
-                resource_canvas_x - 10,
-                resource_canvas_y - 10,
-                resource_canvas_x + 10,
-                resource_canvas_y + 9,
-                fill=self.RESOURCE,
-                outline=self.RESOURCE,
-            )
-            self._canvas.create_text(
-                resource_canvas_x,
-                resource_canvas_y - 17,
-                text="TREE",
-                fill=self.RESOURCE,
-                anchor="s",
-                font=("DejaVu Sans", 8, "bold"),
-            )
-
-        self._canvas.create_oval(
-            center - 10,
-            center - 10,
-            center + 10,
-            center + 10,
-            fill=self.POLITES,
-            outline=self.TEXT,
-            width=2,
-        )
-        self._canvas.create_text(
-            center,
-            center + 17,
-            text="POLITES",
-            fill=self.POLITES,
-            anchor="n",
-            font=("DejaVu Sans", 8, "bold"),
-        )
+        self._draw_engine_frame(self._frame_provider())
 
         self._metrics.set(
             f"episode {record.episode + 1}  ·  step {record.step}\n"
-            f"physical view: {format_physical_status(scene)}"
+            "engine view: actual Player 1 LOS · renderer is visibility authority"
         )
         self._raw_values.set(format_policy_readout(scene))
+
+    def _draw_engine_frame(self, frame: EngineObserverFrame) -> None:
+        """Display the exact scene/LOS frame produced by the 0 A.D. renderer."""
+
+        self._canvas.delete("all")
+        self._engine_photo = self._tk.PhotoImage(data=frame.ppm, format="PPM")
+        center = self.CANVAS_SIZE / 2.0
+        self._canvas.create_image(center, center, image=self._engine_photo)
+        self._canvas.create_text(
+            12,
+            12,
+            text="ENGINE RENDER · PLAYER 1 LOS",
+            fill=self.TEXT,
+            anchor="nw",
+            font=("DejaVu Sans", 8, "bold"),
+        )
 
     def _pump_events(self) -> bool:
         if self._closed:
@@ -449,6 +342,18 @@ def open_agent_view(env: object) -> AgentView:
             "the selected environment does not expose a valid map_size_m"
         ) from error
 
+    engine_observer = getattr(env, "engine_observer", None)
+    check_available = getattr(engine_observer, "check_available", None)
+    frame_provider = getattr(env, "capture_agent_frame", None)
+    if not callable(check_available) or not callable(frame_provider):
+        raise AgentViewUnavailable(
+            "the selected environment does not expose the engine observer"
+        )
+    try:
+        check_available()
+    except EngineObserverError as error:
+        raise AgentViewUnavailable(str(error)) from error
+
     try:
         import tkinter as tk
     except ImportError as error:
@@ -464,6 +369,7 @@ def open_agent_view(env: object) -> AgentView:
             root,
             parsed_map_size,
             POLITES_VISION_RADIUS_M,
+            frame_provider,
         )
     except tk.TclError as error:
         if root is not None:

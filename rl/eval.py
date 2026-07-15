@@ -176,15 +176,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--agent-view",
         action="store_true",
-        help="open a Polites-centered window showing the exact policy observation",
+        help="open a Polites-centered window rendered by the 0 A.D. engine",
     )
     parser.add_argument(
         "--delay",
         type=_non_negative_float,
         default=0.0,
-        help=(
-            "seconds between decisions; with --agent-view, pause before the action"
-        ),
+        help=("seconds between decisions; with --agent-view, pause before the action"),
     )
     parser.add_argument(
         "--replay",

@@ -9,6 +9,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from .engine_observer import EngineObserverClient, EngineObserverUnavailable
 from .core import (
     GATHER_OBSERVATION_LABELS,
     build_observation,
@@ -60,11 +61,17 @@ class ZeroADGatherEnv(gym.Env):
         save_replay=False,
         game=None,
         actions=None,
+        engine_observer=None,
     ):
         # reach_threshold=12: el aldeano no puede pisar el arbol (obstaculo solido);
         # se frena a ~9.5m del centro, asi que "llegar" se cuenta a <12m.
         super().__init__()
         self.game, self.actions = _resolve_backend(uri, game, actions)
+        self.engine_observer = (
+            engine_observer
+            if engine_observer is not None
+            else EngineObserverClient(uri)
+        )
         self.scenario_config = scenario_config
         self.save_replay = save_replay
         self.map_size_m = map_size_m
@@ -110,6 +117,26 @@ class ZeroADGatherEnv(gym.Env):
         truncated = self._step_count >= self.horizon
         obs = build_observation(v, r, self.map_size_m)
         return obs, reward, terminated, truncated, {"distance": cur_dist}
+
+    def capture_agent_frame(self):
+        """Capture the current pre-action Polites view from the patched engine."""
+
+        state = getattr(self.game, "current_state", None)
+        if state is None:
+            raise EngineObserverUnavailable(
+                "the engine observer needs a current game state before capture"
+            )
+        villagers = state.units(owner=1, entity_type=VILLAGER_TYPE)
+        if len(villagers) != 1:
+            raise EngineObserverUnavailable(
+                "the gather observer requires exactly one current Polites"
+            )
+        entity_id = getattr(villagers[0], "id", None)
+        if not callable(entity_id):
+            raise EngineObserverUnavailable(
+                "the zero_ad entity does not expose an engine entity ID"
+            )
+        return self.engine_observer.capture(entity_id())
 
     def close(self):
         """Release the optional live/injected backend exactly once."""
