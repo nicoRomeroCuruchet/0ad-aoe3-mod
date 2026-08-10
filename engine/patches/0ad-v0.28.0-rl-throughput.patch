@@ -1,0 +1,13 @@
+diff --git a/source/ps/GameSetup/GameSetup.cpp b/source/ps/GameSetup/GameSetup.cpp
+index ae0c9e5..f6b31c1 100644
+--- a/source/ps/GameSetup/GameSetup.cpp
++++ b/source/ps/GameSetup/GameSetup.cpp
+@@ -712,7 +712,7 @@ void Init(const CmdLineArgs& args, int flags)
+ 
+ bool InitNonVisual(const CmdLineArgs& args)
+ {
+-	return Autostart(args);
++	return Autostart(args) || args.Has("rl-interface");
+ }
+ 
+ /**

@@ -15,6 +15,7 @@ from rl.gather.env import ZeroADGatherEnv
 
 
 OBSERVER_PATCH = Path("engine/patches/0ad-v0.28.0-agent-observer.patch")
+THROUGHPUT_PATCH = Path("engine/patches/0ad-v0.28.0-rl-throughput.patch")
 
 
 class FakeResponse:
@@ -101,6 +102,14 @@ def test_engine_patch_restores_and_presents_the_normal_view_after_readback():
     present = patch.index("GetBackendDevice()->Present();", normal_render)
 
     assert readback < restore < normal_render < present
+
+
+def test_nonvisual_engine_waits_for_rl_reset_without_an_autostart_map():
+    patch = THROUGHPUT_PATCH.read_text()
+    builder = Path("engine/build_observer.sh").read_text()
+
+    assert 'return Autostart(args) || args.Has("rl-interface");' in patch
+    assert "0ad-v0.28.0-rl-throughput.patch" in builder
 
 
 def test_engine_patch_pins_observer_los_then_restores_the_viewed_player():

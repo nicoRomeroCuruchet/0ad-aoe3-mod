@@ -9,6 +9,7 @@ ARCHIVE="$RUNTIME_ROOT/downloads/$ARCHIVE_NAME"
 SOURCE_ROOT="$RUNTIME_ROOT/source"
 SOURCE_DIR="$SOURCE_ROOT/0ad-0.28.0"
 PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-agent-observer.patch"
+THROUGHPUT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-throughput.patch"
 SOURCE_URL="https://releases.wildfiregames.com/$ARCHIVE_NAME"
 SOURCE_SHA256="27e217755ef76a922fe58dbf593d96e54b6ed2375d23f548c35619aa6bd5a42a"
 RUSTUP_VERSION="1.28.2"
@@ -99,14 +100,23 @@ if [[ ! -f "$SOURCE_MARKER" ]]; then
 	touch "$SOURCE_MARKER"
 fi
 
-if patch --batch --forward --directory "$SOURCE_DIR" --strip 1 --dry-run --silent < "$PATCH_FILE" >/dev/null 2>&1; then
-	patch --batch --forward --directory "$SOURCE_DIR" --strip 1 < "$PATCH_FILE"
-elif patch --batch --forward --directory "$SOURCE_DIR" --strip 1 --reverse --dry-run --silent < "$PATCH_FILE" >/dev/null 2>&1; then
-	printf 'Engine observer patch is already applied.\n'
-else
-	printf 'Observer patch does not apply cleanly to %s\n' "$SOURCE_DIR" >&2
-	exit 1
-fi
+apply_engine_patch() {
+	local patch_file="$1"
+	if patch --batch --forward --directory "$SOURCE_DIR" --strip 1 \
+		--dry-run --silent < "$patch_file" >/dev/null 2>&1; then
+		patch --batch --forward --directory "$SOURCE_DIR" --strip 1 < "$patch_file"
+	elif patch --batch --forward --directory "$SOURCE_DIR" --strip 1 \
+		--reverse --dry-run --silent < "$patch_file" >/dev/null 2>&1; then
+		printf '%s is already applied.\n' "$(basename "$patch_file")"
+	else
+		printf '%s does not apply cleanly to %s\n' \
+			"$(basename "$patch_file")" "$SOURCE_DIR" >&2
+		exit 1
+	fi
+}
+
+apply_engine_patch "$PATCH_FILE"
+apply_engine_patch "$THROUGHPUT_PATCH_FILE"
 
 # Release 28 needs Python 3.11 for its bundled SpiderMonkey build. Reuse the
 # repository runtime installed by setup.sh when available.
