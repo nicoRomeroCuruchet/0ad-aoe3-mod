@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from numbers import Real
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping, Protocol, runtime_checkable
 
@@ -76,6 +77,10 @@ class TrainRequest:
     agent: AgentSpec
     total_steps: int
     seed: int
+    log_dir: Path | None = None
+    log_interval: int = 1
+    best_model_path: Path | None = None
+    resume_from: Path | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.agent, AgentSpec):
@@ -84,6 +89,17 @@ class TrainRequest:
             raise ValueError("total_steps must be a positive integer")
         if not _is_integer(self.seed) or self.seed < 0:
             raise ValueError("seed must be a non-negative integer")
+        if self.log_dir is not None and not isinstance(self.log_dir, Path):
+            raise ValueError("log_dir must be a pathlib.Path or None")
+        if not _is_integer(self.log_interval) or self.log_interval <= 0:
+            raise ValueError("log_interval must be a positive integer")
+        if self.best_model_path is not None and not isinstance(
+            self.best_model_path,
+            Path,
+        ):
+            raise ValueError("best_model_path must be a pathlib.Path or None")
+        if self.resume_from is not None and not isinstance(self.resume_from, Path):
+            raise ValueError("resume_from must be a pathlib.Path or None")
 
 
 @runtime_checkable

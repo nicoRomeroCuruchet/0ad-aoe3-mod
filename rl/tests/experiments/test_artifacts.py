@@ -29,9 +29,11 @@ def test_create_run_artifacts_makes_a_predictable_isolated_layout(tmp_path: Path
     assert artifacts.run_dir == tmp_path / "m0-sb3-sac-20260714T120000Z"
     assert artifacts.run_dir.is_dir()
     assert artifacts.model_path == artifacts.run_dir / "model"
+    assert artifacts.best_model_path == artifacts.run_dir / "best_model"
     assert artifacts.config_path == artifacts.run_dir / "resolved_config.json"
     assert artifacts.metrics_path == artifacts.run_dir / "metrics.json"
     assert artifacts.metadata_path == artifacts.run_dir / "metadata.json"
+    assert artifacts.training_log_dir == artifacts.run_dir / "training"
 
 
 @pytest.mark.parametrize("run_name", ["", "../escape", "has spaces", "/absolute"])
@@ -98,7 +100,7 @@ def test_record_run_serializes_resolved_config_metrics_and_metadata(tmp_path: Pa
             name="sb3_sac",
             parameters={"policy": "MlpPolicy", "net_arch": [64, 64]},
         ),
-        training=TrainingConfig(total_steps=1_000, seed=7),
+        training=TrainingConfig(total_steps=1_000, seed=7, log_interval=3),
         evaluation=EvaluationConfig(episodes=1, deterministic=True, seed=8),
     )
     report = EvaluationReport(
@@ -136,7 +138,7 @@ def test_record_run_serializes_resolved_config_metrics_and_metadata(tmp_path: Pa
             "scenario": "rl/reset_config.json",
         },
         "evaluation": {"deterministic": True, "episodes": 1, "seed": 8},
-        "training": {"seed": 7, "total_steps": 1_000},
+        "training": {"log_interval": 3, "seed": 7, "total_steps": 1_000},
     }
     assert json.loads(artifacts.metrics_path.read_text(encoding="utf-8")) == {
         "episodes": [

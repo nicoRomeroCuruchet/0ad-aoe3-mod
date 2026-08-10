@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 import gymnasium as gym
@@ -57,6 +58,9 @@ def train_policy(
     *,
     trainer_builder: TrainerBuilder = build_trainer,
     decision_observer: DecisionObserver | None = None,
+    log_dir: Path | None = None,
+    best_model_path: Path | None = None,
+    resume_from: Path | None = None,
 ) -> Policy:
     """Train the configured agent against an already-created environment."""
 
@@ -69,5 +73,9 @@ def train_policy(
         agent=config.agent,
         total_steps=config.training.total_steps,
         seed=config.training.seed,
+        log_dir=log_dir,
+        log_interval=config.training.log_interval,
+        best_model_path=best_model_path,
+        resume_from=resume_from,
     )
     return trainer.fit(request)

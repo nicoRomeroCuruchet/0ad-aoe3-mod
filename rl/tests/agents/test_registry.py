@@ -24,6 +24,10 @@ class DummyEnv:
     action_space = spaces.Box(-1.0, 1.0, shape=(2,), dtype=np.float32)
 
 
+class CommandDummyEnv:
+    action_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
+
+
 class SavableModel:
     def __init__(self):
         self.saved_to = None
@@ -52,6 +56,16 @@ def test_registry_builds_seeded_random_and_oracle_policies():
     np.testing.assert_array_equal(
         oracle.act(observation, deterministic=True),
         np.array([0.25, -0.75], dtype=np.float32),
+    )
+
+
+def test_registry_builds_oracle_that_matches_command_action_space():
+    oracle = build_policy(AgentSpec("oracle"), CommandDummyEnv(), seed=11)
+    observation = np.array([0.0, 0.0, 0.25, -0.75, 0.5], dtype=np.float32)
+
+    np.testing.assert_array_equal(
+        oracle.act(observation, deterministic=True),
+        np.array([0.25, -0.75, 1.0], dtype=np.float32),
     )
 
 

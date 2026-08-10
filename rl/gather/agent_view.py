@@ -13,6 +13,7 @@ from rl.experiments.evaluation import DecisionObserver, DecisionRecord
 
 from .core import (
     GATHER_OBSERVATION_LABELS,
+    GATHER_RESOURCE_OBSERVATION_LABELS,
     POLITES_VISION_RADIUS_M,
     denormalize_action,
 )
@@ -60,6 +61,7 @@ class LocalObservationScene:
     vision_radius_m: float
     visible_resource_local_m: tuple[float, float] | None
     normalized_observation: tuple[float, ...]
+    observation_labels: tuple[str, ...]
 
 
 def _validated_map_size(map_size_m: float) -> float:
@@ -84,10 +86,21 @@ def project_local_observation(
     """Separate physical Polites vision from the omniscient M0 observation."""
 
     values = np.asarray(observation).reshape(-1)
-    if len(values) != len(GATHER_OBSERVATION_LABELS):
-        raise ValueError("gather agent view requires exactly five values")
+    if len(values) < len(GATHER_OBSERVATION_LABELS):
+        raise ValueError("gather agent view requires at least five values")
     if not np.isfinite(values).all():
         raise ValueError("gather agent view values must be finite")
+    if len(values) == len(GATHER_RESOURCE_OBSERVATION_LABELS):
+        labels = GATHER_RESOURCE_OBSERVATION_LABELS
+    elif len(values) == len(GATHER_OBSERVATION_LABELS):
+        labels = GATHER_OBSERVATION_LABELS
+    else:
+        labels = tuple(
+            (
+                *GATHER_OBSERVATION_LABELS,
+                *(f"extra_{index}_norm" for index in range(len(values) - 5)),
+            )
+        )
 
     size = _validated_map_size(map_size_m)
     vision_radius = _validated_vision_radius(vision_radius_m)
@@ -113,6 +126,7 @@ def project_local_observation(
             else None
         ),
         normalized_observation=normalized,
+        observation_labels=labels,
     )
 
 
@@ -133,7 +147,7 @@ def format_policy_readout(scene: LocalObservationScene) -> str:
     raw = ", ".join(
         f"{label}={value:.9g}"
         for label, value in zip(
-            GATHER_OBSERVATION_LABELS,
+            scene.observation_labels,
             scene.normalized_observation,
             strict=True,
         )
@@ -264,9 +278,9 @@ def open_agent_view(env: object) -> AgentView:
     """Create the opt-in Tk window after validating gather-env compatibility."""
 
     labels = tuple(getattr(env, "observation_labels", ()))
-    if labels != GATHER_OBSERVATION_LABELS:
+    if labels[: len(GATHER_OBSERVATION_LABELS)] != GATHER_OBSERVATION_LABELS:
         raise AgentViewUnavailable(
-            "--agent-view currently supports only the five-value M0 gather observation"
+            "--agent-view requires gather observations starting with the five geometry values"
         )
     map_size_m = getattr(env, "map_size_m", None)
     try:

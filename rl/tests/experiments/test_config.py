@@ -24,6 +24,7 @@ weight_decay = 0.0
 [training]
 total_steps = 10000
 seed = 1
+log_interval = 2
 
 [evaluation]
 episodes = 20
@@ -49,6 +50,7 @@ def test_load_experiment_config_builds_frozen_typed_sections(tmp_path):
     assert config.agent.parameters["optimizer"]["name"] == "adam"
     assert config.training.total_steps == 10_000
     assert config.training.seed == 1
+    assert config.training.log_interval == 2
     assert config.evaluation.episodes == 20
     assert config.evaluation.deterministic is True
     assert config.evaluation.seed == 1001
@@ -83,6 +85,7 @@ def test_load_experiment_config_requires_every_section(tmp_path):
         ("total_steps = 10000", "total_steps = true", "training.total_steps"),
         ("total_steps = 10000", "total_steps = 0", "training.total_steps"),
         ("seed = 1", "seed = -1", "training.seed"),
+        ("log_interval = 2", "log_interval = 0", "training.log_interval"),
         ("episodes = 20", "episodes = 0", "evaluation.episodes"),
         ("deterministic = true", "deterministic = \"yes\"", "evaluation.deterministic"),
         ("seed = 1001", "seed = -1", "evaluation.seed"),
@@ -108,3 +111,11 @@ def test_load_experiment_config_rejects_unknown_training_and_evaluation_keys(tmp
 
     with pytest.raises(ConfigError, match="unknown key 'training.stepz'"):
         load_experiment_config(write_config(tmp_path, text))
+
+
+def test_load_experiment_config_defaults_training_log_interval(tmp_path):
+    text = VALID_CONFIG.replace("log_interval = 2\n", "")
+
+    config = load_experiment_config(write_config(tmp_path, text))
+
+    assert config.training.log_interval == 1

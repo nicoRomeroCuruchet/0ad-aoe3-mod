@@ -16,6 +16,7 @@ from rl.gather.agent_view import (
 from rl.gather.engine_observer import EngineObserverFrame
 from rl.gather.core import (
     GATHER_OBSERVATION_LABELS,
+    GATHER_RESOURCE_OBSERVATION_LABELS,
     POLITES_VISION_RADIUS_M,
     build_observation,
 )
@@ -34,6 +35,7 @@ def test_project_local_observation_recenters_exact_policy_input_on_polites():
     assert scene.vision_radius_m == POLITES_VISION_RADIUS_M
     assert scene.visible_resource_local_m is None
     assert scene.normalized_observation == pytest.approx(tuple(observation))
+    assert scene.observation_labels == GATHER_OBSERVATION_LABELS
 
 
 @pytest.mark.parametrize(
@@ -103,6 +105,26 @@ def test_policy_readout_discloses_omniscient_coordinates_outside_vision():
         assert label in readout
 
 
+def test_project_local_observation_accepts_resource_state_features():
+    observation = build_observation(
+        (256.0, 256.0),
+        (320.0, 256.0),
+        512.0,
+        carried_resource=10.0,
+        carried_resource_scale=20.0,
+        resource_stock=300.0,
+        resource_stock_scale=1000.0,
+    )
+
+    scene = project_local_observation(observation, map_size_m=512.0)
+    readout = format_policy_readout(scene)
+
+    assert scene.observation_labels == GATHER_RESOURCE_OBSERVATION_LABELS
+    assert scene.normalized_observation[-2:] == pytest.approx((0.5, 0.3))
+    assert "carried_wood_norm=0.5" in readout
+    assert "stock_wood_norm=0.300000012" in readout
+
+
 def test_physical_status_does_not_leak_out_of_range_distance():
     observation = build_observation(
         (256.0, 256.0),
@@ -120,7 +142,7 @@ def test_physical_status_does_not_leak_out_of_range_distance():
 @pytest.mark.parametrize(
     ("observation", "message"),
     [
-        (np.zeros(4, dtype=np.float32), "exactly five values"),
+        (np.zeros(4, dtype=np.float32), "at least five values"),
         (np.array([0.0, 0.0, np.nan, 0.0, 0.0]), "finite"),
     ],
 )
@@ -155,7 +177,7 @@ def test_open_agent_view_rejects_non_gather_observations_before_opening_tk():
         observation_labels = ("other",)
         map_size_m = 512.0
 
-    with pytest.raises(AgentViewUnavailable, match="only the five-value M0"):
+    with pytest.raises(AgentViewUnavailable, match="starting with the five geometry"):
         open_agent_view(UnsupportedEnv())
 
 

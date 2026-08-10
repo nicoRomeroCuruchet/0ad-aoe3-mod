@@ -44,6 +44,70 @@ def test_build_environment_forwards_scenario_and_parameters(monkeypatch):
     assert config.parameters["scenario"] == "rl/reset_config.json"
 
 
+def test_build_environment_forwards_m1_stock_parameters(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "rl.experiments.environments.make_gather_env",
+        lambda scenario, **parameters: calls.append((scenario, parameters)) or object(),
+    )
+    config = EnvironmentConfig(
+        name="zero_ad_gather",
+        parameters={
+            "scenario": "rl/reset_config.json",
+            "reward_mode": "stock_delta",
+            "stock_resource": "wood",
+            "stock_player": 1,
+            "stock_success_threshold": 1.0,
+            "gather_command_distance": 12.0,
+            "agent_controls_click": True,
+            "click_action_threshold": 0.0,
+            "resource_state_observation": True,
+            "carried_resource_observation_scale": 20.0,
+            "stock_observation_scale": 1000.0,
+            "distance_shaping_scale": 0.02,
+            "gather_ready_reward": 0.25,
+            "carried_resource_delta_reward_scale": 0.2,
+            "gather_cycle_no_click_reward": 0.02,
+            "carrying_no_click_reward": 0.05,
+            "click_gather_cycle_penalty": 1.0,
+            "backend_retries": 2,
+            "backend_retry_delay": 0.25,
+            "server_command": ["./run_game.sh", "--rl-interface=127.0.0.1:6000"],
+            "server_startup_delay": 0.0,
+        },
+    )
+
+    build_environment(config)
+
+    assert calls == [
+        (
+            "rl/reset_config.json",
+            {
+                "agent_controls_click": True,
+                "backend_retries": 2,
+                "backend_retry_delay": 0.25,
+                "carried_resource_observation_scale": 20.0,
+                "click_action_threshold": 0.0,
+                "click_gather_cycle_penalty": 1.0,
+                "carried_resource_delta_reward_scale": 0.2,
+                "distance_shaping_scale": 0.02,
+                "gather_command_distance": 12.0,
+                "gather_ready_reward": 0.25,
+                "gather_cycle_no_click_reward": 0.02,
+                "carrying_no_click_reward": 0.05,
+                "resource_state_observation": True,
+                "reward_mode": "stock_delta",
+                "server_command": ["./run_game.sh", "--rl-interface=127.0.0.1:6000"],
+                "server_startup_delay": 0.0,
+                "stock_observation_scale": 1000.0,
+                "stock_player": 1,
+                "stock_resource": "wood",
+                "stock_success_threshold": 1.0,
+            },
+        )
+    ]
+
+
 def test_build_environment_rejects_unknown_environment_names():
     config = EnvironmentConfig(name="typo")
 
@@ -116,6 +180,29 @@ def test_gather_environment_allows_an_explicit_remote_server_opt_in(monkeypatch)
         ("map_size_m", 0.0),
         ("reach_threshold", "near"),
         ("save_replay", 1),
+        ("reward_mode", "closer"),
+        ("stock_resource", ""),
+        ("stock_player", 0),
+        ("stock_success_threshold", 0.0),
+        ("gather_command_distance", 0.0),
+        ("agent_controls_gather", 1),
+        ("gather_action_threshold", 1.5),
+        ("agent_controls_click", 1),
+        ("click_action_threshold", 1.5),
+        ("resource_state_observation", 1),
+        ("carried_resource_observation_scale", 0.0),
+        ("stock_observation_scale", 0.0),
+        ("distance_shaping_scale", -0.1),
+        ("gather_ready_reward", -0.1),
+        ("carried_resource_delta_reward_scale", -0.1),
+        ("gather_cycle_no_click_reward", -0.1),
+        ("carrying_no_click_reward", -0.1),
+        ("click_gather_cycle_penalty", -0.1),
+        ("backend_retries", -1),
+        ("backend_retry_delay", -0.1),
+        ("server_command", "./run_game.sh"),
+        ("server_command", []),
+        ("server_startup_delay", -0.1),
     ],
 )
 def test_gather_environment_validates_environment_specific_parameters(

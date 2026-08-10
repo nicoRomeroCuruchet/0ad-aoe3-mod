@@ -28,6 +28,7 @@ class FakeModel:
 class FakeSAC:
     constructed = []
     loaded_from = []
+    loaded_kwargs = []
 
     def __init__(self, policy, env, **kwargs):
         self.policy_name = policy
@@ -35,10 +36,28 @@ class FakeSAC:
         self.kwargs = kwargs
         self.learn_calls = []
         self.predict_calls = []
+        self.logger = None
+        self.saved_paths = []
+        self.random_seed = None
         FakeSAC.constructed.append(self)
 
-    def learn(self, *, total_timesteps):
-        self.learn_calls.append(total_timesteps)
+    def set_random_seed(self, seed):
+        self.random_seed = seed
+
+    def set_logger(self, logger):
+        self.logger = logger
+
+    def learn(
+        self,
+        *,
+        total_timesteps,
+        log_interval,
+        callback=None,
+        reset_num_timesteps=True,
+    ):
+        self.learn_calls.append(
+            (total_timesteps, log_interval, callback, reset_num_timesteps)
+        )
         return self
 
     def predict(self, observation, *, deterministic):
@@ -47,10 +66,12 @@ class FakeSAC:
 
     def save(self, path):
         self.saved_to = path
+        self.saved_paths.append(path)
 
     @classmethod
-    def load(cls, path):
+    def load(cls, path, **kwargs):
         cls.loaded_from.append(path)
+        cls.loaded_kwargs.append(kwargs)
         return cls("loaded", None)
 
 
@@ -70,7 +91,15 @@ def test_sb3_policy_adapts_predict_to_the_common_policy_contract(tmp_path: Path)
 
 def test_sb3_sac_trainer_owns_the_library_specific_training_loop(monkeypatch):
     monkeypatch.setattr("rl.agents.sb3._load_sac_class", lambda: FakeSAC)
+    configured_loggers = []
+
+    def fake_configure(path, formats):
+        configured_loggers.append((path, formats))
+        return {"path": path, "formats": formats}
+
+    monkeypatch.setattr("rl.agents.sb3._load_logger_configure", lambda: fake_configure)
     env = object()
+    log_dir = Path("rl/runs/example/training")
     request = TrainRequest(
         env=env,
         agent=AgentSpec(
@@ -83,6 +112,8 @@ def test_sb3_sac_trainer_owns_the_library_specific_training_loop(monkeypatch):
         ),
         total_steps=1_234,
         seed=7,
+        log_dir=log_dir,
+        log_interval=3,
     )
 
     policy = SB3SACTrainer().fit(request)
@@ -96,7 +127,89 @@ def test_sb3_sac_trainer_owns_the_library_specific_training_loop(monkeypatch):
         "learning_starts": 200,
         "seed": 7,
     }
-    assert model.learn_calls == [1_234]
+    assert model.learn_calls == [(1_234, 3, None, True)]
+    assert configured_loggers == [(str(log_dir), ["stdout", "csv", "json"])]
+    assert model.logger == {
+        "path": str(log_dir),
+        "formats": ["stdout", "csv", "json"],
+    }
+
+
+def test_sb3_sac_trainer_can_continue_from_a_checkpoint(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("rl.agents.sb3._load_sac_class", lambda: FakeSAC)
+    configured_loggers = []
+
+    def fake_configure(path, formats):
+        configured_loggers.append((path, formats))
+        return {"path": path, "formats": formats}
+
+    monkeypatch.setattr("rl.agents.sb3._load_logger_configure", lambda: fake_configure)
+    env = object()
+    checkpoint = tmp_path / "best_model"
+    request = TrainRequest(
+        env=env,
+        agent=AgentSpec(name="sb3_sac", parameters={"policy": "MlpPolicy"}),
+        total_steps=500,
+        seed=11,
+        log_dir=tmp_path / "training",
+        log_interval=2,
+        resume_from=checkpoint,
+    )
+
+    policy = SB3SACTrainer().fit(request)
+
+    model = policy.model
+    assert isinstance(policy, SB3Policy)
+    assert FakeSAC.loaded_from[-1] == str(checkpoint)
+    assert FakeSAC.loaded_kwargs[-1] == {"env": env}
+    assert model.random_seed == 11
+    assert model.learn_calls == [(500, 2, None, False)]
+    assert configured_loggers == [
+        (str(tmp_path / "training"), ["stdout", "csv", "json"])
+    ]
+
+
+def test_sb3_sac_trainer_saves_the_best_episode_reward(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("rl.agents.sb3._load_sac_class", lambda: FakeSAC)
+
+    class FakeCallback:
+        def __init__(self):
+            self.locals = {}
+            self.model = None
+
+    monkeypatch.setattr(
+        "rl.agents.sb3._load_base_callback_class",
+        lambda: FakeCallback,
+    )
+    request = TrainRequest(
+        env=object(),
+        agent=AgentSpec(name="sb3_sac"),
+        total_steps=123,
+        seed=7,
+        best_model_path=tmp_path / "best_model",
+    )
+
+    SB3SACTrainer().fit(request)
+
+    model = FakeSAC.constructed[-1]
+    callback = model.learn_calls[-1][2]
+    callback.model = model
+    callback.locals = {
+        "infos": [
+            {"episode": {"r": 0.0}},
+            {"episode": {"r": -1.0}},
+            {"episode": {"r": 2.5}},
+            {"episode": {"r": 2.5}},
+        ]
+    }
+
+    assert callback._on_step() is True
+    assert model.saved_to == str(tmp_path / "best_model")
+    assert model.saved_paths == [
+        str(tmp_path / "best_model"),
+        str(tmp_path / "best_model"),
+    ]
+    assert callback.best_reward == 2.5
 
 
 def test_load_sb3_sac_policy_uses_the_same_adapter(monkeypatch, tmp_path: Path):

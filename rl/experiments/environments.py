@@ -30,6 +30,28 @@ _GATHER_PARAMETERS = frozenset(
         "reach_threshold",
         "sim_steps_per_action",
         "save_replay",
+        "reward_mode",
+        "stock_resource",
+        "stock_player",
+        "stock_success_threshold",
+        "gather_command_distance",
+        "agent_controls_gather",
+        "gather_action_threshold",
+        "agent_controls_click",
+        "click_action_threshold",
+        "resource_state_observation",
+        "carried_resource_observation_scale",
+        "stock_observation_scale",
+        "distance_shaping_scale",
+        "gather_ready_reward",
+        "carried_resource_delta_reward_scale",
+        "gather_cycle_no_click_reward",
+        "carrying_no_click_reward",
+        "click_gather_cycle_penalty",
+        "backend_retries",
+        "backend_retry_delay",
+        "server_command",
+        "server_startup_delay",
     }
 )
 
@@ -64,6 +86,60 @@ def _validate_positive_number(name: str, value: Any, maximum: float) -> None:
     ):
         raise EnvironmentConfigError(
             f"{name} must be a finite positive number no greater than {maximum:g}",
+        )
+
+
+def _validate_non_negative_number(name: str, value: Any, maximum: float) -> None:
+    if (
+        not isinstance(value, Real)
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+        or value < 0
+        or value > maximum
+    ):
+        raise EnvironmentConfigError(
+            f"{name} must be a finite non-negative number no greater than {maximum:g}",
+        )
+
+
+def _validate_bounded_number(name: str, value: Any, minimum: float, maximum: float) -> None:
+    if (
+        not isinstance(value, Real)
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+        or value < minimum
+        or value > maximum
+    ):
+        raise EnvironmentConfigError(
+            f"{name} must be a finite number between {minimum:g} and {maximum:g}",
+        )
+
+
+def _validate_non_negative_integer(name: str, value: Any, maximum: int) -> None:
+    if (
+        not isinstance(value, int)
+        or isinstance(value, bool)
+        or value < 0
+        or value > maximum
+    ):
+        raise EnvironmentConfigError(
+            f"{name} must be a non-negative integer no greater than {maximum}",
+        )
+
+
+def _validate_non_empty_string(name: str, value: Any) -> None:
+    if not isinstance(value, str) or not value.strip():
+        raise EnvironmentConfigError(f"{name} must be a non-empty string")
+
+
+def _validate_server_command(value: Any) -> None:
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(part, str) and part for part in value)
+    ):
+        raise EnvironmentConfigError(
+            "server_command must be a non-empty list of strings",
         )
 
 
@@ -129,6 +205,126 @@ def _validate_gather_parameters(
         )
     if "save_replay" in parameters and not isinstance(parameters["save_replay"], bool):
         raise EnvironmentConfigError("save_replay must be a boolean")
+    if "reward_mode" in parameters and parameters["reward_mode"] not in {
+        "distance_delta",
+        "stock_delta",
+    }:
+        raise EnvironmentConfigError(
+            "reward_mode must be 'distance_delta' or 'stock_delta'",
+        )
+    if "stock_resource" in parameters:
+        _validate_non_empty_string("stock_resource", parameters["stock_resource"])
+    if "stock_player" in parameters:
+        _validate_positive_integer("stock_player", parameters["stock_player"], 16)
+    if "stock_success_threshold" in parameters:
+        _validate_positive_number(
+            "stock_success_threshold",
+            parameters["stock_success_threshold"],
+            1_000_000,
+        )
+    if "gather_command_distance" in parameters:
+        _validate_positive_number(
+            "gather_command_distance",
+            parameters["gather_command_distance"],
+            1_000_000,
+        )
+    if "agent_controls_gather" in parameters and not isinstance(
+        parameters["agent_controls_gather"],
+        bool,
+    ):
+        raise EnvironmentConfigError("agent_controls_gather must be a boolean")
+    if "gather_action_threshold" in parameters:
+        _validate_bounded_number(
+            "gather_action_threshold",
+            parameters["gather_action_threshold"],
+            -1.0,
+            1.0,
+        )
+    if "agent_controls_click" in parameters and not isinstance(
+        parameters["agent_controls_click"],
+        bool,
+    ):
+        raise EnvironmentConfigError("agent_controls_click must be a boolean")
+    if "click_action_threshold" in parameters:
+        _validate_bounded_number(
+            "click_action_threshold",
+            parameters["click_action_threshold"],
+            -1.0,
+            1.0,
+        )
+    if "resource_state_observation" in parameters and not isinstance(
+        parameters["resource_state_observation"],
+        bool,
+    ):
+        raise EnvironmentConfigError("resource_state_observation must be a boolean")
+    if "carried_resource_observation_scale" in parameters:
+        _validate_positive_number(
+            "carried_resource_observation_scale",
+            parameters["carried_resource_observation_scale"],
+            1_000_000,
+        )
+    if "stock_observation_scale" in parameters:
+        _validate_positive_number(
+            "stock_observation_scale",
+            parameters["stock_observation_scale"],
+            1_000_000,
+        )
+    if "distance_shaping_scale" in parameters:
+        _validate_non_negative_number(
+            "distance_shaping_scale",
+            parameters["distance_shaping_scale"],
+            1_000_000,
+        )
+    if "gather_ready_reward" in parameters:
+        _validate_non_negative_number(
+            "gather_ready_reward",
+            parameters["gather_ready_reward"],
+            1_000_000,
+        )
+    if "carried_resource_delta_reward_scale" in parameters:
+        _validate_non_negative_number(
+            "carried_resource_delta_reward_scale",
+            parameters["carried_resource_delta_reward_scale"],
+            1_000_000,
+        )
+    if "gather_cycle_no_click_reward" in parameters:
+        _validate_non_negative_number(
+            "gather_cycle_no_click_reward",
+            parameters["gather_cycle_no_click_reward"],
+            1_000_000,
+        )
+    if "carrying_no_click_reward" in parameters:
+        _validate_non_negative_number(
+            "carrying_no_click_reward",
+            parameters["carrying_no_click_reward"],
+            1_000_000,
+        )
+    if "click_gather_cycle_penalty" in parameters:
+        _validate_non_negative_number(
+            "click_gather_cycle_penalty",
+            parameters["click_gather_cycle_penalty"],
+            1_000_000,
+        )
+    if "backend_retries" in parameters:
+        _validate_non_negative_integer(
+            "backend_retries",
+            parameters["backend_retries"],
+            100,
+        )
+    if "backend_retry_delay" in parameters:
+        _validate_non_negative_number(
+            "backend_retry_delay",
+            parameters["backend_retry_delay"],
+            3600,
+        )
+    if "server_command" in parameters:
+        _validate_server_command(parameters["server_command"])
+    if "server_startup_delay" in parameters:
+        _validate_non_negative_number(
+            "server_startup_delay",
+            parameters["server_startup_delay"],
+            3600,
+        )
 
     horizon = parameters.get("horizon", 50)
     simulation_steps = parameters.get("sim_steps_per_action", 10)

@@ -12,6 +12,10 @@ export function* generateMap()
 	// Aldeano del mod (player 1), a la izquierda del centro.
 	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(c.x - 20, c.y), 0);
 
+	// Dropsite cercano: M1 mide reward por stock real, y la madera solo entra
+	// al stock cuando el aldeano puede depositarla.
+	g_Map.placeEntityPassable("structures/athenai/rl_storehouse", 1, new Vector2D(c.x - 28, c.y + 10), 0);
+
 	// Recurso gaia (player 0), a la derecha del centro.
 	g_Map.placeEntityPassable("gaia/tree/oak", 0, new Vector2D(c.x + 20, c.y), 0);
 

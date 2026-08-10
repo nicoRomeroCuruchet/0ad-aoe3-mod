@@ -9,3 +9,4 @@ def test_rl_gather_exports_release_28_map_generator():
 
     assert "export function* generateMap(" in source
     assert "function* GenerateMap(" not in source
+    assert '"structures/athenai/rl_storehouse"' in source

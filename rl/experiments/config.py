@@ -56,10 +56,12 @@ class TrainingConfig:
 
     total_steps: int
     seed: int
+    log_interval: int = 1
 
     def __post_init__(self) -> None:
         _require_positive_integer(self.total_steps, "training.total_steps")
         _require_non_negative_integer(self.seed, "training.seed")
+        _require_positive_integer(self.log_interval, "training.log_interval")
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,7 +143,7 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
     _reject_unknown_keys(
         training_data,
         "training",
-        frozenset({"total_steps", "seed"}),
+        frozenset({"total_steps", "seed", "log_interval"}),
     )
     _reject_unknown_keys(
         evaluation_data,
@@ -165,6 +167,7 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
         training=TrainingConfig(
             total_steps=_require_key(training_data, "training", "total_steps"),
             seed=_require_key(training_data, "training", "seed"),
+            log_interval=training_data.get("log_interval", 1),
         ),
         evaluation=EvaluationConfig(
             episodes=_require_key(evaluation_data, "evaluation", "episodes"),

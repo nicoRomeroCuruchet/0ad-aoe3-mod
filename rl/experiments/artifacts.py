@@ -34,9 +34,11 @@ class RunArtifacts:
 
     run_dir: Path
     model_path: Path
+    best_model_path: Path
     config_path: Path
     metrics_path: Path
     metadata_path: Path
+    training_log_dir: Path
 
 
 def create_run_artifacts(
@@ -64,9 +66,11 @@ def create_run_artifacts(
     return RunArtifacts(
         run_dir=run_dir,
         model_path=run_dir / "model",
+        best_model_path=run_dir / "best_model",
         config_path=run_dir / "resolved_config.json",
         metrics_path=run_dir / "metrics.json",
         metadata_path=run_dir / "metadata.json",
+        training_log_dir=run_dir / "training",
     )
 
 
@@ -116,6 +120,7 @@ def _config_payload(config: ExperimentConfig) -> dict[str, Any]:
         "training": {
             "total_steps": config.training.total_steps,
             "seed": config.training.seed,
+            "log_interval": config.training.log_interval,
         },
         "evaluation": {
             "episodes": config.evaluation.episodes,

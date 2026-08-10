@@ -45,6 +45,11 @@ class RandomPolicy:
 class GatherOraclePolicy:
     """Target the resource coordinates exposed by the M0 gather observation."""
 
+    def __init__(self, action_size: int = 2) -> None:
+        if action_size not in {2, 3}:
+            raise ValueError("gather oracle action_size must be 2 or 3")
+        self._action_size = action_size
+
     def act(
         self,
         observation: np.ndarray,
@@ -57,4 +62,9 @@ class GatherOraclePolicy:
         values = np.asarray(observation)
         if values.ndim != 1 or values.size < 4:
             raise ValueError("gather observations must contain at least four values")
-        return np.asarray(values[2:4], dtype=np.float32).copy()
+        action = np.empty(self._action_size, dtype=np.float32)
+        action[:2] = values[2:4]
+        if self._action_size == 3:
+            # Third dimension is a generic click/no-click signal in M1.
+            action[2] = 1.0
+        return action

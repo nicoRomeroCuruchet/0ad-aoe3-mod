@@ -53,8 +53,28 @@ def test_gather_oracle_targets_resource_coordinates():
     assert observation[2] == 0.75
 
 
+def test_gather_oracle_can_emit_a_click_signal():
+    observation = np.array(
+        [-0.5, 0.25, 0.75, -0.25, 0.8],
+        dtype=np.float32,
+    )
+    policy = GatherOraclePolicy(action_size=3)
+
+    action = policy.act(observation, deterministic=True)
+
+    np.testing.assert_array_equal(
+        action,
+        np.array([0.75, -0.25, 1.0], dtype=np.float32),
+    )
+
+
 def test_gather_oracle_validates_observation_shape():
     policy = GatherOraclePolicy()
 
     with pytest.raises(ValueError, match="at least four values"):
         policy.act(np.zeros(3, dtype=np.float32), deterministic=False)
+
+
+def test_gather_oracle_rejects_unsupported_action_sizes():
+    with pytest.raises(ValueError, match="action_size"):
+        GatherOraclePolicy(action_size=4)

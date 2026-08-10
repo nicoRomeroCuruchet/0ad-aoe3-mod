@@ -1,4 +1,5 @@
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -64,9 +65,16 @@ def test_train_request_is_frozen_and_validates_its_budget():
         agent=AgentSpec(name="custom_sac"),
         total_steps=1_000,
         seed=7,
+        log_dir=Path("rl/runs/example/training"),
+        log_interval=2,
+        best_model_path=Path("rl/runs/example/best_model"),
+        resume_from=Path("rl/runs/previous/best_model"),
     )
 
     assert request.total_steps == 1_000
+    assert request.log_interval == 2
+    assert request.best_model_path == Path("rl/runs/example/best_model")
+    assert request.resume_from == Path("rl/runs/previous/best_model")
     with pytest.raises(FrozenInstanceError):
         request.seed = 8
 
@@ -83,6 +91,38 @@ def test_train_request_is_frozen_and_validates_its_budget():
             agent=AgentSpec(name="custom_sac"),
             total_steps=10,
             seed=-1,
+        )
+    with pytest.raises(ValueError, match="log_interval must be a positive integer"):
+        TrainRequest(
+            env=object(),
+            agent=AgentSpec(name="custom_sac"),
+            total_steps=10,
+            seed=7,
+            log_interval=0,
+        )
+    with pytest.raises(ValueError, match="log_dir"):
+        TrainRequest(
+            env=object(),
+            agent=AgentSpec(name="custom_sac"),
+            total_steps=10,
+            seed=7,
+            log_dir="rl/runs/example/training",
+        )
+    with pytest.raises(ValueError, match="best_model_path"):
+        TrainRequest(
+            env=object(),
+            agent=AgentSpec(name="custom_sac"),
+            total_steps=10,
+            seed=7,
+            best_model_path="rl/runs/example/best_model",
+        )
+    with pytest.raises(ValueError, match="resume_from"):
+        TrainRequest(
+            env=object(),
+            agent=AgentSpec(name="custom_sac"),
+            total_steps=10,
+            seed=7,
+            resume_from="rl/runs/previous/best_model",
         )
 
 

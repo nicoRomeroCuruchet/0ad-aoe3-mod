@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import gymnasium as gym
 import numpy as np
 import pytest
@@ -53,7 +55,7 @@ def experiment_config():
             parameters={"scenario": "unused.json"},
         ),
         agent=AgentSpec(name="student_algorithm", parameters={"learning_rate": 0.1}),
-        training=TrainingConfig(total_steps=321, seed=7),
+        training=TrainingConfig(total_steps=321, seed=7, log_interval=2),
         evaluation=EvaluationConfig(episodes=2, deterministic=True, seed=100),
     )
 
@@ -67,6 +69,8 @@ def test_train_policy_only_depends_on_the_common_trainer_contract():
         config,
         env,
         trainer_builder=lambda agent: trainer,
+        best_model_path=Path("rl/runs/example/best_model"),
+        resume_from=Path("rl/runs/previous/best_model"),
     )
 
     assert isinstance(policy, ConstantPolicy)
@@ -76,6 +80,9 @@ def test_train_policy_only_depends_on_the_common_trainer_contract():
             agent=config.agent,
             total_steps=321,
             seed=7,
+            log_interval=2,
+            best_model_path=Path("rl/runs/example/best_model"),
+            resume_from=Path("rl/runs/previous/best_model"),
         )
     ]
 

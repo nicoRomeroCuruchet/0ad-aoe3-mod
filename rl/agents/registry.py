@@ -52,9 +52,13 @@ def _build_random(agent: AgentSpec, env: Any, seed: int) -> Policy:
 
 
 def _build_oracle(agent: AgentSpec, env: Any, seed: int) -> Policy:
-    del env, seed
+    del seed
     _require_no_parameters(agent)
-    return GatherOraclePolicy()
+    action_space = getattr(env, "action_space", None)
+    action_size = 2
+    if action_space is not None and getattr(action_space, "shape", None):
+        action_size = int(action_space.shape[0])
+    return GatherOraclePolicy(action_size=action_size)
 
 
 def _load_sb3(agent: AgentSpec, path: str | Path) -> Policy:
