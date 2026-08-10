@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
+from statistics import fmean
 from typing import Any, Mapping
 
 import numpy as np
@@ -14,6 +15,9 @@ from .base import Policy, TrainRequest
 
 class SB3DependencyError(RuntimeError):
     """Raised when an SB3 agent is selected without its optional dependency."""
+
+
+BEST_MODEL_EPISODES = 10
 
 
 def _load_sac_class() -> type[Any]:
@@ -89,19 +93,27 @@ def _build_best_reward_callback(path: Path) -> Any:
         def __init__(self, destination: Path) -> None:
             super().__init__()
             self.destination = destination
-            self.best_reward = float("-inf")
+            self.pending_rewards: tuple[float, ...] = ()
+            self.best_mean_reward = float("-inf")
 
         def _on_step(self) -> bool:
             for reward in _episode_rewards(self.locals.get("infos")):
-                if reward > self.best_reward:
-                    self.best_reward = reward
-                    self.destination.parent.mkdir(parents=True, exist_ok=True)
-                    _save_checkpoint(self.model, self.destination)
-                    print(
-                        f"best_model: {self.destination} "
-                        f"episode_reward={reward:.6g}",
-                        flush=True,
-                    )
+                self.pending_rewards = (*self.pending_rewards, reward)
+                if len(self.pending_rewards) < BEST_MODEL_EPISODES:
+                    continue
+                mean_reward = fmean(self.pending_rewards)
+                self.pending_rewards = ()
+                if mean_reward <= self.best_mean_reward:
+                    continue
+                self.best_mean_reward = mean_reward
+                self.destination.parent.mkdir(parents=True, exist_ok=True)
+                _save_checkpoint(self.model, self.destination)
+                print(
+                    f"best_model: {self.destination} "
+                    f"mean_episode_reward={mean_reward:.6g} "
+                    f"episodes={BEST_MODEL_EPISODES}",
+                    flush=True,
+                )
             return True
 
     return BestRewardCheckpointCallback(path)

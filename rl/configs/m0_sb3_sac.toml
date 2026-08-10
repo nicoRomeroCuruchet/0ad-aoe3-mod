@@ -13,6 +13,9 @@ policy = "MlpPolicy"
 verbose = 1
 learning_starts = 200
 buffer_size = 50000
+batch_size = 128
+train_freq = 8
+gradient_steps = 8
 
 [training]
 total_steps = 5000
@@ -20,6 +23,6 @@ seed = 0
 log_interval = 1
 
 [evaluation]
-episodes = 10
+episodes = 1
 deterministic = true
 seed = 1000

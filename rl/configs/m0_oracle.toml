@@ -15,6 +15,6 @@ total_steps = 5000
 seed = 0
 
 [evaluation]
-episodes = 10
+episodes = 1
 deterministic = true
 seed = 1000

@@ -119,7 +119,7 @@ Opciones de `rl.eval`:
 | `--delay 0.5` | pausa (seg) entre decisiones; con `--agent-view`, pausa antes de ejecutar la acción |
 | `--agent-view` | abre el render real del LOS del Polites y audita aparte el input omnisciente de la política |
 | `--verbose` | imprime paso a paso (observación, target, distancia, stock si existe, reward) |
-| `--episodes N` | cuántos episodios correr (default 10) |
+| `--episodes N` | cuántos episodios correr (la config fija usa 1 para oracle/SAC y 10 para random) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
 | `--record-agent-view DIR` | guarda frames PNG del observer y un `index.html` reproducible sin Tk |
 | `--record-agent-view-video FILE.mp4` | codifica esos frames renderizados a MP4 con `ffmpeg` |
@@ -154,9 +154,9 @@ Cada checkpoint SAC incluye un archivo hermano `*.replay_buffer.pkl`; conservá 
 reanudar sin descartar la experiencia acumulada. `TRUST_MODEL=1` cubre los dos archivos
 serializados. Los checkpoints antiguos que sólo tienen el modelo siguen funcionando, pero SAC
 vuelve a llenar un buffer inicial antes de actualizar la red.
-Mientras entrena SAC, también guarda `best_model` cada vez que un episodio terminado supera el
-mejor reward anterior; usá ese checkpoint para inspeccionar la mejor política encontrada hasta
-ese momento aunque el run siga abierto.
+Mientras entrena SAC, también guarda `best_model` cuando mejora el reward medio del siguiente
+bloque de 10 episodios terminados. Esto evita elegir un outlier y reduce escrituras síncronas;
+usá ese checkpoint para inspeccionar la mejor política encontrada aunque el run siga abierto.
 
 El entrenamiento imprime la carpeta de la corrida **antes** de empezar y SB3 escribe métricas en
 `training/progress.csv` y `training/progress.json` dentro de esa carpeta. Para seguirlo en vivo:

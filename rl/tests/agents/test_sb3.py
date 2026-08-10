@@ -220,7 +220,10 @@ def test_sb3_sac_trainer_rewarms_a_legacy_model_only_checkpoint(
     assert policy.model.learning_starts == policy.model.num_timesteps + 200
 
 
-def test_sb3_sac_trainer_saves_the_best_episode_reward(monkeypatch, tmp_path: Path):
+def test_sb3_sac_trainer_saves_the_best_ten_episode_mean(
+    monkeypatch,
+    tmp_path: Path,
+):
     monkeypatch.setattr("rl.agents.sb3._load_sac_class", lambda: FakeSAC)
 
     class FakeCallback:
@@ -245,16 +248,20 @@ def test_sb3_sac_trainer_saves_the_best_episode_reward(monkeypatch, tmp_path: Pa
     model = FakeSAC.constructed[-1]
     callback = model.learn_calls[-1][2]
     callback.model = model
-    callback.locals = {
-        "infos": [
-            {"episode": {"r": 0.0}},
-            {"episode": {"r": -1.0}},
-            {"episode": {"r": 2.5}},
-            {"episode": {"r": 2.5}},
-        ]
-    }
+    for reward in range(9):
+        callback.locals = {"infos": [{"episode": {"r": float(reward)}}]}
+        assert callback._on_step() is True
+    assert model.saved_paths == []
 
+    callback.locals = {"infos": [{"episode": {"r": 9.0}}]}
     assert callback._on_step() is True
+    for reward in [0.0] * 10:
+        callback.locals = {"infos": [{"episode": {"r": reward}}]}
+        assert callback._on_step() is True
+    for reward in [10.0] * 10:
+        callback.locals = {"infos": [{"episode": {"r": reward}}]}
+        assert callback._on_step() is True
+
     assert model.saved_to == str(tmp_path / "best_model")
     assert model.saved_paths == [
         str(tmp_path / "best_model"),
@@ -264,7 +271,7 @@ def test_sb3_sac_trainer_saves_the_best_episode_reward(monkeypatch, tmp_path: Pa
         str(tmp_path / "best_model.replay_buffer.pkl"),
         str(tmp_path / "best_model.replay_buffer.pkl"),
     ]
-    assert callback.best_reward == 2.5
+    assert callback.best_mean_reward == 10.0
 
 
 def test_load_sb3_sac_policy_uses_the_same_adapter(monkeypatch, tmp_path: Path):

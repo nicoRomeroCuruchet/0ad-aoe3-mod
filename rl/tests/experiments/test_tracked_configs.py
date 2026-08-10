@@ -19,6 +19,25 @@ def test_all_tracked_experiment_configs_are_valid_and_comparable():
     }.issubset(path.name for path in paths)
 
     configs_by_name = {path.name: load_experiment_config(path) for path in paths}
+    assert {
+        configs_by_name[name].evaluation.episodes
+        for name in (
+            "m0_oracle.toml",
+            "m0_sb3_sac.toml",
+            "m1_oracle.toml",
+            "m1_sb3_sac.toml",
+        )
+    } == {1}
+    assert {
+        configs_by_name[name].evaluation.episodes
+        for name in ("m0_random.toml", "m1_random.toml")
+    } == {10}
+    for name in ("m0_sb3_sac.toml", "m1_sb3_sac.toml"):
+        parameters = configs_by_name[name].agent.parameters
+        assert parameters["batch_size"] == 128
+        assert parameters["train_freq"] == 8
+        assert parameters["gradient_steps"] == 8
+
     starter_configs = [
         configs_by_name[name]
         for name in ("m0_oracle.toml", "m0_random.toml", "m0_sb3_sac.toml")
