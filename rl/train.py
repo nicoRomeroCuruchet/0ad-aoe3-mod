@@ -53,6 +53,7 @@ def apply_overrides(
     *,
     uri: str | None,
     total_steps: int | None,
+    log_interval: int | None = None,
 ) -> ExperimentConfig:
     """Return a new config with optional machine/run-specific CLI values."""
 
@@ -71,6 +72,9 @@ def apply_overrides(
                 config.training.total_steps if total_steps is None else total_steps
             ),
             seed=config.training.seed,
+            log_interval=(
+                config.training.log_interval if log_interval is None else log_interval
+            ),
         ),
         evaluation=config.evaluation,
     )
@@ -94,6 +98,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="override training.total_steps",
     )
     parser.add_argument(
+        "--log-interval",
+        type=_positive_integer,
+        help="episodes between SB3 training metric dumps",
+    )
+    parser.add_argument(
         "--run-root",
         type=Path,
         default=Path("rl/runs"),
@@ -108,6 +117,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help="allow --out to replace an existing checkpoint",
+    )
+    parser.add_argument(
+        "--resume-from",
+        type=Path,
+        help="trusted checkpoint to continue training from",
+    )
+    parser.add_argument(
+        "--trust-model",
+        action="store_true",
+        help="confirm that --resume-from is trusted before deserializing it",
     )
     parser.add_argument(
         "--agent-view",
@@ -149,11 +168,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.delay and not args.agent_view:
         parser.error("--delay requires --agent-view")
+    if args.resume_from is not None and not args.trust_model:
+        parser.error(
+            "refusing to deserialize --resume-from without explicit --trust-model"
+        )
     loaded_config = load_experiment_config(args.experiment)
     config = apply_overrides(
         loaded_config,
         uri=args.uri,
         total_steps=args.timesteps,
+        log_interval=args.log_interval,
     )
     ensure_can_save(config.agent)
     if args.out is not None and not args.force:
@@ -168,6 +192,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     artifacts = create_run_artifacts(args.run_root, args.experiment.stem)
     model_path = args.out if args.out is not None else artifacts.model_path
+    best_model_path = artifacts.best_model_path
+    print(f"run: {artifacts.run_dir}", flush=True)
+    print(f"training_logs: {artifacts.training_log_dir}", flush=True)
+    print(f"best_model: {best_model_path}", flush=True)
     env = build_environment(
         config.environment,
         allow_remote=args.allow_remote_server,
@@ -189,6 +217,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             config,
             env,
             decision_observer=decision_observer,
+            log_dir=artifacts.training_log_dir,
+            best_model_path=best_model_path,
+            resume_from=args.resume_from,
         )
         model_path.parent.mkdir(parents=True, exist_ok=True)
         save_policy(config.agent, policy, model_path)
@@ -196,6 +227,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "agent": config.agent.name,
             "experiment_file": str(args.experiment),
             "model_path": str(model_path),
+            "best_model_path": str(best_model_path),
+            "resume_from": None if args.resume_from is None else str(args.resume_from),
         }
         record_run_context(
             artifacts,
@@ -203,6 +236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata={
                 **metadata,
                 "python": platform.python_version(),
+                "training_log_dir": str(artifacts.training_log_dir),
                 "status": "checkpoint_saved",
             },
         )
@@ -221,6 +255,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             metadata={
                 **metadata,
                 "python": platform.python_version(),
+                "training_log_dir": str(artifacts.training_log_dir),
                 "status": "complete",
             },
         )
@@ -231,7 +266,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         finally:
             _close_environment(env)
 
-    print(f"run: {artifacts.run_dir}")
     print(f"modelo: {model_path}")
     print(
         "evaluación: "

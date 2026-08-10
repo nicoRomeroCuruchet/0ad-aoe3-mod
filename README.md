@@ -58,8 +58,17 @@ The reinforcement-learning code uses a reproducible repo-level Python environmen
 Python 3.11 when needed, and syncs the exact versions from `uv.lock`:
 
 ```bash
+# If `uv` is not installed yet on Ubuntu:
+sudo apt install pipx
+pipx install uv
+export PATH="$HOME/.local/bin:$PATH"
+
 make setup
 ```
+
+If you used the standalone `uv` installer from a VS Code Snap terminal and it
+installed under `~/snap/code/.../.local/bin`, run the `source .../env` command it
+prints, or just rerun `make setup`; the Makefile also searches that Snap path.
 
 Use the short, versioned project commands without activating the environment manually:
 
@@ -80,10 +89,12 @@ make server
 
 The builder downloads and verifies the official 0 A.D. Release 28 build source under the ignored
 `.runtime/` directory. The launcher reuses the art data from `.runtime/0ad/0ad.AppImage`, so it
-does not create another full copy of the public mod assets. On Ubuntu, install `libenet-dev` if
-the builder reports that it is missing. Allow roughly 7 GB for the source, local Rust toolchain,
-and build products. This observer build omits audio, the lobby, and Atlas because it is intended
-only for local RL visualization.
+does not create another full copy of the public mod assets. On Ubuntu, install the native build
+helpers first with `sudo apt install build-essential cmake curl libboost-dev libboost-filesystem-dev libcurl4-gnutls-dev libenet-dev libfmt-dev libfreetype-dev libicu-dev libpng-dev libsdl2-dev libsodium-dev libx11-dev libxml2-dev llvm m4 patch pkg-config python3 uuid-dev xvfb zlib1g-dev`.
+Allow roughly 7 GB for the source, local Rust toolchain, and build products. This observer build
+omits audio, the lobby, and Atlas because it is intended only for local RL visualization.
+If `make server` runs from a terminal without an X11 display, the launcher uses `xvfb-run`
+automatically when `xvfb` is installed; otherwise install it with `sudo apt install xvfb`.
 
 The Makefile is only a thin interface: `make setup` runs `uv sync --locked`, and the other
 targets run their Python tools through `uv run`. For an interactive terminal, you can instead

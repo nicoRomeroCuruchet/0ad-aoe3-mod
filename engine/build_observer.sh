@@ -99,9 +99,9 @@ if [[ ! -f "$SOURCE_MARKER" ]]; then
 	touch "$SOURCE_MARKER"
 fi
 
-if patch --batch --forward --directory "$SOURCE_DIR" --strip 1 --dry-run --silent < "$PATCH_FILE"; then
+if patch --batch --forward --directory "$SOURCE_DIR" --strip 1 --dry-run --silent < "$PATCH_FILE" >/dev/null 2>&1; then
 	patch --batch --forward --directory "$SOURCE_DIR" --strip 1 < "$PATCH_FILE"
-elif patch --batch --forward --directory "$SOURCE_DIR" --strip 1 --reverse --dry-run --silent < "$PATCH_FILE"; then
+elif patch --batch --forward --directory "$SOURCE_DIR" --strip 1 --reverse --dry-run --silent < "$PATCH_FILE" >/dev/null 2>&1; then
 	printf 'Engine observer patch is already applied.\n'
 else
 	printf 'Observer patch does not apply cleanly to %s\n' "$SOURCE_DIR" >&2
@@ -176,9 +176,61 @@ fi
 sed -i 's#unix_names = { os.findlib("boost_filesystem-mt") and "boost_filesystem-mt" or "boost_filesystem", os.findlib("boost_system-mt") and "boost_system-mt" or "boost_system" },#unix_names = { os.findlib("boost_filesystem-mt") and "boost_filesystem-mt" or "boost_filesystem" },#' \
 	"$SOURCE_DIR/build/premake/extern_libs5.lua"
 
-if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists libenet; then
-	printf '%s\n' \
-		'Missing 0 A.D. build prerequisite. Install it with: sudo apt install libenet-dev' >&2
+missing_packages=()
+for command in cc g++ make tar curl patch m4 python3; do
+	if ! command -v "$command" >/dev/null 2>&1; then
+		case "$command" in
+			cc|g++) missing_packages+=(build-essential) ;;
+			make) missing_packages+=(build-essential) ;;
+			*) missing_packages+=("$command") ;;
+		esac
+	fi
+done
+if ! command -v cmake >/dev/null 2>&1; then
+	missing_packages+=(cmake)
+fi
+if ! command -v llvm-objdump >/dev/null 2>&1 && ! compgen -G '/usr/bin/llvm-objdump-[0-9]*' >/dev/null; then
+	missing_packages+=(llvm)
+fi
+if ! command -v pkg-config >/dev/null 2>&1; then
+	missing_packages+=(pkg-config)
+else
+	for dependency in \
+		"libenet:libenet-dev" \
+		"zlib:zlib1g-dev" \
+		"sdl2:libsdl2-dev" \
+		"libpng:libpng-dev" \
+		"libcurl:libcurl4-gnutls-dev" \
+		"libsodium:libsodium-dev" \
+		"freetype2:libfreetype-dev" \
+		"icu-i18n:libicu-dev" \
+		"icu-uc:libicu-dev" \
+		"libxml-2.0:libxml2-dev" \
+		"x11:libx11-dev"; do
+		if ! pkg-config --exists "${dependency%%:*}"; then
+			missing_packages+=("${dependency#*:}")
+		fi
+	done
+fi
+if ! printf '#include <fmt/printf.h>\n' | g++ -E -x c++ - >/dev/null 2>&1; then
+	missing_packages+=(libfmt-dev)
+fi
+if ! printf '#include <boost/random/linear_congruential.hpp>\n' | g++ -E -x c++ - >/dev/null 2>&1; then
+	missing_packages+=(libboost-dev)
+fi
+boost_filesystem_test="$RUNTIME_ROOT/boost-filesystem-link-test"
+if ! printf 'int main() { return 0; }\n' | \
+	g++ -x c++ - -lboost_filesystem -o "$boost_filesystem_test" >/dev/null 2>&1; then
+	missing_packages+=(libboost-filesystem-dev)
+fi
+rm -f "$boost_filesystem_test"
+if ! printf '#include <uuid/uuid.h>\n' | cc -E - >/dev/null 2>&1; then
+	missing_packages+=(uuid-dev)
+fi
+if [[ "${#missing_packages[@]}" -gt 0 ]]; then
+	mapfile -t missing_packages < <(printf '%s\n' "${missing_packages[@]}" | sort -u)
+	printf 'Missing 0 A.D. build prerequisite(s). Install with: sudo apt install %s\n' \
+		"${missing_packages[*]}" >&2
 	exit 1
 fi
 

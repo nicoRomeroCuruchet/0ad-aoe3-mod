@@ -17,6 +17,7 @@ buffer_size = 50000
 [training]
 total_steps = 5000
 seed = 0
+log_interval = 1
 
 [evaluation]
 episodes = 10

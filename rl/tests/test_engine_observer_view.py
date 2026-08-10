@@ -197,7 +197,21 @@ def test_observer_builder_skips_unneeded_debug_spidermonkey():
     assert '[[ "$rustc_version" != "rustc $RUST_TOOLCHAIN "' in builder
     assert '[[ "$cbindgen_version" != "cbindgen 0.29.0"' in builder
     assert builder.count("--forward") == 3
-    assert "pkg-config --exists libenet" in builder
+    for dependency in (
+        "libenet:libenet-dev",
+        "sdl2:libsdl2-dev",
+        "libpng:libpng-dev",
+        "libcurl:libcurl4-gnutls-dev",
+        "libsodium:libsodium-dev",
+        "freetype2:libfreetype-dev",
+        "icu-i18n:libicu-dev",
+        "libxml-2.0:libxml2-dev",
+        "x11:libx11-dev",
+    ):
+        assert dependency in builder
+    assert "fmt/printf.h" in builder
+    assert "boost/random/linear_congruential.hpp" in builder
+    assert "libboost-filesystem-dev" in builder
     for option in ("--without-atlas", "--without-audio", "--without-lobby"):
         assert option in builder
     assert "BUILD_RELEASE_ONLY" in patch

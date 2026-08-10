@@ -1,0 +1,43 @@
+[environment]
+name = "zero_ad_gather"
+scenario = "rl/reset_config.json"
+uri = "http://localhost:6000"
+map_size_m = 512.0
+horizon = 120
+reach_threshold = 12.0
+sim_steps_per_action = 80
+reward_mode = "stock_delta"
+stock_resource = "wood"
+stock_player = 1
+stock_success_threshold = 1.0
+gather_command_distance = 12.0
+agent_controls_click = true
+click_action_threshold = 0.0
+resource_state_observation = true
+carried_resource_observation_scale = 20.0
+stock_observation_scale = 1000.0
+distance_shaping_scale = 0.02
+gather_ready_reward = 0.25
+carried_resource_delta_reward_scale = 0.2
+gather_cycle_no_click_reward = 0.02
+carrying_no_click_reward = 0.05
+click_gather_cycle_penalty = 1.0
+backend_retries = 2
+backend_retry_delay = 1.0
+
+[agent]
+name = "sb3_sac"
+policy = "MlpPolicy"
+verbose = 1
+learning_starts = 500
+buffer_size = 50000
+
+[training]
+total_steps = 10000
+seed = 0
+log_interval = 1
+
+[evaluation]
+episodes = 10
+deterministic = true
+seed = 1000

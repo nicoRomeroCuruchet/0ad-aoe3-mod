@@ -24,6 +24,7 @@ policy = "MlpPolicy"
 [training]
 total_steps = 5000
 seed = 3
+log_interval = 2
 
 [evaluation]
 episodes = 1
@@ -106,13 +107,16 @@ def test_apply_overrides_returns_a_new_validated_config(tmp_path: Path):
         original,
         uri="http://example.test:7000",
         total_steps=12,
+        log_interval=4,
     )
 
     assert updated is not original
     assert updated.environment.parameters["uri"] == "http://example.test:7000"
     assert updated.training.total_steps == 12
+    assert updated.training.log_interval == 4
     assert original.environment.parameters["uri"] == "http://localhost:6000"
     assert original.training.total_steps == 5000
+    assert original.training.log_interval == 2
 
 
 @pytest.mark.parametrize("delay", ["-0.1", "nan", "inf", "-inf"])
@@ -135,10 +139,21 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
         calls["environment"] = (config, kwargs)
         return env
 
-    def fake_train_policy(config, selected_env, *, decision_observer):
+    def fake_train_policy(
+        config,
+        selected_env,
+        *,
+        decision_observer,
+        log_dir,
+        best_model_path,
+        resume_from,
+    ):
         calls["config"] = config
         calls["env"] = selected_env
         calls["training_observer"] = decision_observer
+        calls["training_log_dir"] = log_dir
+        calls["best_model_path"] = best_model_path
+        calls["resume_from"] = resume_from
         events.append("train")
         return ConstantPolicy()
 
@@ -164,6 +179,8 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
             str(tmp_path / "runs"),
             "--timesteps",
             "12",
+            "--log-interval",
+            "3",
             "--uri",
             "http://example.test:7000",
             "--allow-remote-server",
@@ -175,7 +192,11 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
     assert len(run_directories) == 1
     assert calls["env"] is env
     assert calls["config"].training.total_steps == 12
+    assert calls["config"].training.log_interval == 3
     assert calls["saved"][2] == run_directories[0] / "model"
+    assert calls["training_log_dir"] == run_directories[0] / "training"
+    assert calls["best_model_path"] == run_directories[0] / "best_model"
+    assert calls["resume_from"] is None
     assert calls["environment"][1] == {"allow_remote": True}
     assert calls["training_observer"] is None
     assert calls["evaluation"][2]["decision_observer"] is None
@@ -187,11 +208,93 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
     )
     assert resolved["environment"]["uri"] == "http://example.test:7000"
     assert resolved["training"]["total_steps"] == 12
+    assert resolved["training"]["log_interval"] == 3
     metadata = json.loads(
         (run_directories[0] / "metadata.json").read_text(encoding="utf-8")
     )
     assert metadata["status"] == "complete"
-    assert "modelo:" in capsys.readouterr().out
+    assert metadata["training_log_dir"] == str(run_directories[0] / "training")
+    assert metadata["best_model_path"] == str(run_directories[0] / "best_model")
+    output = capsys.readouterr().out
+    assert "training_logs:" in output
+    assert "best_model:" in output
+    assert "modelo:" in output
+
+
+def test_main_requires_trust_when_resuming_from_a_checkpoint(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(
+        train_cli,
+        "build_environment",
+        lambda config, **kwargs: (_ for _ in ()).throw(AssertionError),
+    )
+
+    with pytest.raises(SystemExit) as error:
+        train_cli.main(
+            [
+                "--experiment",
+                str(write_experiment(tmp_path)),
+                "--resume-from",
+                "rl/runs/previous/best_model",
+            ]
+        )
+
+    assert error.value.code == 2
+    assert "--trust-model" in capsys.readouterr().err
+
+
+def test_main_can_resume_training_from_a_trusted_checkpoint(
+    tmp_path: Path,
+    monkeypatch,
+):
+    experiment_path = write_experiment(tmp_path)
+    env = CloseableEnv()
+    calls = {}
+    checkpoint = Path("rl/runs/previous/best_model")
+
+    monkeypatch.setattr(train_cli, "build_environment", lambda config, **kwargs: env)
+
+    def fake_train_policy(
+        config,
+        selected_env,
+        *,
+        decision_observer,
+        log_dir,
+        best_model_path,
+        resume_from,
+    ):
+        del config, selected_env, decision_observer, log_dir, best_model_path
+        calls["resume_from"] = resume_from
+        return ConstantPolicy()
+
+    monkeypatch.setattr(train_cli, "train_policy", fake_train_policy)
+    monkeypatch.setattr(train_cli, "save_policy", lambda agent, policy, path: None)
+    monkeypatch.setattr(
+        train_cli,
+        "evaluate",
+        lambda selected_env, policy, **kwargs: completed_report(),
+    )
+
+    exit_code = train_cli.main(
+        [
+            "--experiment",
+            str(experiment_path),
+            "--run-root",
+            str(tmp_path / "runs"),
+            "--resume-from",
+            str(checkpoint),
+            "--trust-model",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls["resume_from"] == checkpoint
+    run_directory = next((tmp_path / "runs").iterdir())
+    metadata = json.loads((run_directory / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["resume_from"] == str(checkpoint)
 
 
 def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
@@ -209,9 +312,13 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
     monkeypatch.setattr(
         train_cli,
         "train_policy",
-        lambda config, selected_env, *, decision_observer: (
-            events.append("train") or ConstantPolicy()
-        ),
+        lambda config,
+        selected_env,
+        *,
+        decision_observer,
+        log_dir,
+        best_model_path,
+        resume_from: (events.append("train") or ConstantPolicy()),
     )
     monkeypatch.setattr(
         train_cli,
@@ -248,6 +355,7 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
     assert (run_directory / "resolved_config.json").is_file()
     metadata = json.loads((run_directory / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["status"] == "checkpoint_saved"
+    assert metadata["training_log_dir"] == str(run_directory / "training")
     assert not (run_directory / "metrics.json").exists()
 
 
@@ -265,8 +373,17 @@ def test_main_shows_and_paces_training_and_post_training_evaluation(
         lambda config, **kwargs: env,
     )
 
-    def fake_train_policy(config, selected_env, *, decision_observer):
-        del config, selected_env
+    def fake_train_policy(
+        config,
+        selected_env,
+        *,
+        decision_observer,
+        log_dir,
+        best_model_path,
+        resume_from,
+    ):
+        del config, selected_env, log_dir
+        del best_model_path, resume_from
         events.append("train")
         decision_observer(
             DecisionRecord(
@@ -346,7 +463,13 @@ def test_main_closes_the_environment_when_agent_view_close_fails(
     monkeypatch.setattr(
         train_cli,
         "train_policy",
-        lambda config, selected_env, *, decision_observer: ConstantPolicy(),
+        lambda config,
+        selected_env,
+        *,
+        decision_observer,
+        log_dir,
+        best_model_path,
+        resume_from: ConstantPolicy(),
     )
     monkeypatch.setattr(train_cli, "save_policy", lambda agent, policy, path: None)
     monkeypatch.setattr(train_cli, "open_agent_view", lambda selected_env: agent_view)
@@ -382,9 +505,13 @@ def test_main_does_not_train_when_agent_view_cannot_open(
     monkeypatch.setattr(
         train_cli,
         "train_policy",
-        lambda config, selected_env, *, decision_observer: (
-            events.append("train") or ConstantPolicy()
-        ),
+        lambda config,
+        selected_env,
+        *,
+        decision_observer,
+        log_dir,
+        best_model_path,
+        resume_from: (events.append("train") or ConstantPolicy()),
     )
     monkeypatch.setattr(
         train_cli,

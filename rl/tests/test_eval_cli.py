@@ -6,6 +6,8 @@ import pytest
 import rl.eval as eval_cli
 from rl.agents.baselines import GatherOraclePolicy
 from rl.experiments.evaluation import DecisionRecord, StepRecord
+from rl.gather.engine_observer import EngineObserverFrame, EngineObserverUnavailable
+from rl.gather.rollout_recording import AgentViewRolloutRecorder
 
 
 ORACLE_EXPERIMENT = """
@@ -52,6 +54,9 @@ class OneStepEnv:
     def step(self, action):
         np.testing.assert_array_equal(action, np.array([0.5, -0.5], dtype=np.float32))
         return np.zeros(5, dtype=np.float32), 3.0, True, False, {"distance": 0.0}
+
+    def capture_agent_frame(self):
+        return EngineObserverFrame(1, 1, b"P6\n1 1\n255\n\x10\x20\x30")
 
     def close(self):
         self.closed = True
@@ -173,7 +178,16 @@ def test_verbose_observer_reports_denormalized_target_and_applies_delay(
         reward=1.25,
         terminated=False,
         truncated=False,
-        info={"distance": 8.0},
+        info={
+            "distance": 8.0,
+            "resource_stock": 14.0,
+            "resource_stock_delta": 4.0,
+            "carried_resource": 10.0,
+            "carried_resource_delta": 10.0,
+            "carried_resource_delta_reward": 2.0,
+            "gather_cycle_no_click_reward": 0.02,
+            "click_gather_cycle_penalty": 1.0,
+        },
     )
 
     observer(record)
@@ -188,6 +202,9 @@ def test_verbose_observer_reports_denormalized_target_and_applies_delay(
     )
     assert "target=(384,128)" in output
     assert "dist=8.0" in output
+    assert "stock=14.0 dstock=+4.0" in output
+    assert "carried=10.0 dcarried=+10.0" in output
+    assert "parts=[carry=+2.00 wait=+0.02 interrupt=-1.00]" in output
 
 
 def test_agent_view_observer_updates_before_pre_action_delay():
@@ -246,6 +263,176 @@ def test_main_opens_updates_and_closes_opt_in_agent_view(
     assert len(agent_view.records) == 1
     assert agent_view.close_calls == 1
     assert env.closed is True
+
+
+def test_main_records_agent_view_rollout_without_opening_tk(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    env = OneStepEnv()
+    output_dir = tmp_path / "rollout"
+    monkeypatch.setattr(eval_cli, "build_environment", lambda config, **kwargs: env)
+
+    exit_code = eval_cli.main(
+        [
+            "--experiment",
+            str(write_experiment(tmp_path)),
+            "--record-agent-view",
+            str(output_dir),
+        ]
+    )
+
+    index = output_dir / "deterministic/index.html"
+    metadata = output_dir / "deterministic/metadata.jsonl"
+    frame = output_dir / "deterministic/frames/ep000-step0000.png"
+    assert exit_code == 0
+    assert f"rollout: {index}" in capsys.readouterr().out
+    assert index.exists()
+    assert metadata.read_text(encoding="utf-8").count("\n") == 1
+    assert frame.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert env.closed is True
+
+
+def test_rollout_recorder_retries_transient_observer_unavailability(
+    tmp_path: Path,
+    monkeypatch,
+):
+    sleeps = []
+
+    class FlakyCaptureEnv:
+        def __init__(self):
+            self.calls = 0
+
+        def capture_agent_frame(self):
+            self.calls += 1
+            if self.calls == 1:
+                raise EngineObserverUnavailable("renderer warming up")
+            return EngineObserverFrame(1, 1, b"P6\n1 1\n255\n\x10\x20\x30")
+
+    monkeypatch.setattr("rl.gather.rollout_recording.time.sleep", sleeps.append)
+    env = FlakyCaptureEnv()
+    recorder = AgentViewRolloutRecorder(
+        tmp_path / "rollout",
+        env,
+        capture_attempts=2,
+        capture_retry_delay=0.1,
+    )
+
+    recorder.observe(
+        DecisionRecord(
+            episode=0,
+            step=0,
+            observation=np.zeros(5, dtype=np.float32),
+            action=np.zeros(3, dtype=np.float32),
+        )
+    )
+
+    assert env.calls == 2
+    assert sleeps == [0.1]
+    assert (tmp_path / "rollout/frames/ep000-step0000.png").exists()
+
+
+def test_rollout_recorder_falls_back_to_schematic_frame(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+):
+    class UnavailableCaptureEnv:
+        def capture_agent_frame(self):
+            raise EngineObserverUnavailable("no renderer")
+
+    monkeypatch.setattr("rl.gather.rollout_recording.time.sleep", lambda _delay: None)
+    recorder = AgentViewRolloutRecorder(
+        tmp_path / "rollout",
+        UnavailableCaptureEnv(),
+        capture_attempts=2,
+        fallback_to_schematic=True,
+    )
+
+    recorder.observe(
+        DecisionRecord(
+            episode=0,
+            step=0,
+            observation=np.array([0.0, 0.0, 0.5, -0.5, 0.25], dtype=np.float32),
+            action=np.array([0.5, -0.5, 1.0], dtype=np.float32),
+        )
+    )
+
+    metadata = (tmp_path / "rollout/metadata.jsonl").read_text(encoding="utf-8")
+    assert '"frame_source": "schematic"' in metadata
+    assert (tmp_path / "rollout/frames/ep000-step0000.png").read_bytes().startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
+    assert "recording schematic" in capsys.readouterr().out
+
+
+def test_rollout_recorder_requires_engine_frames_by_default(tmp_path: Path):
+    class UnavailableCaptureEnv:
+        def capture_agent_frame(self):
+            raise EngineObserverUnavailable("no renderer")
+
+    recorder = AgentViewRolloutRecorder(
+        tmp_path / "rollout",
+        UnavailableCaptureEnv(),
+        capture_attempts=1,
+    )
+
+    with pytest.raises(EngineObserverUnavailable, match="did not produce a frame"):
+        recorder.observe(
+            DecisionRecord(
+                episode=0,
+                step=0,
+                observation=np.zeros(5, dtype=np.float32),
+                action=np.zeros(3, dtype=np.float32),
+            )
+        )
+
+
+def test_rollout_recorder_encodes_recorded_frames_to_mp4(
+    tmp_path: Path,
+    monkeypatch,
+):
+    calls = []
+    monkeypatch.setattr(
+        "rl.gather.rollout_recording.shutil.which",
+        lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None,
+    )
+    monkeypatch.setattr(
+        "rl.gather.rollout_recording.subprocess.run",
+        lambda command, **kwargs: calls.append((command, kwargs)),
+    )
+    recorder = AgentViewRolloutRecorder(tmp_path / "rollout", OneStepEnv())
+    recorder.observe(
+        DecisionRecord(
+            episode=0,
+            step=0,
+            observation=np.zeros(5, dtype=np.float32),
+            action=np.zeros(2, dtype=np.float32),
+        )
+    )
+
+    video_path = recorder.write_video(tmp_path / "rollout.mp4")
+
+    assert video_path == tmp_path / "rollout.mp4"
+    assert calls == [
+        (
+            [
+                "/usr/bin/ffmpeg",
+                "-y",
+                "-framerate",
+                "4",
+                "-pattern_type",
+                "glob",
+                "-i",
+                str(tmp_path / "rollout/frames/*.png"),
+                "-pix_fmt",
+                "yuv420p",
+                str(tmp_path / "rollout.mp4"),
+            ],
+            {"check": True},
+        )
+    ]
 
 
 def test_main_closes_agent_view_when_evaluation_fails(tmp_path: Path, monkeypatch):

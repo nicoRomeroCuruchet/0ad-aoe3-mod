@@ -24,6 +24,7 @@ from rl.experiments.config import (
 )
 from rl.experiments.environments import build_environment
 from rl.experiments.evaluation import (
+    DecisionObserver,
     EvaluationReport,
     StepObserver,
     StepRecord,
@@ -36,6 +37,7 @@ from rl.gather.agent_view import (
     open_agent_view,
 )
 from rl.gather.core import denormalize_action
+from rl.gather.rollout_recording import AgentViewRolloutRecorder, mode_recording_dir
 
 
 DEFAULT_EXPERIMENT = Path("rl/configs/m0_oracle.toml")
@@ -121,13 +123,67 @@ def make_step_observer(
         else:
             x, z = denormalize_action(record.action, map_size_m)
             target = f"target=({x:.0f},{z:.0f})"
+            action_values = np.asarray(record.action).reshape(-1)
+            if action_values.size >= 3:
+                target += f" click_signal={float(action_values[2]):+.2f}"
         distance = record.info.get("distance")
         distance_text = "" if distance is None else f" dist={float(distance):.1f}"
+        command = record.info.get("command")
+        command_text = "" if command is None else f" command={command}"
+        stock = record.info.get("resource_stock")
+        stock_delta = record.info.get("resource_stock_delta")
+        stock_text = (
+            ""
+            if stock is None
+            else f" stock={float(stock):.1f} dstock={float(stock_delta or 0.0):+.1f}"
+        )
+        carried = record.info.get("carried_resource")
+        carried_delta = record.info.get("carried_resource_delta")
+        carried_text = (
+            ""
+            if carried is None
+            else (
+                f" carried={float(carried):.1f}"
+                f" dcarried={float(carried_delta or 0.0):+.1f}"
+            )
+        )
+        reward_parts = []
+        for key, label in (
+            ("distance_shaping_reward", "dist"),
+            ("gather_ready_reward", "ready"),
+            ("carried_resource_delta_reward", "carry"),
+            ("gather_cycle_no_click_reward", "wait"),
+            ("carrying_no_click_reward", "hold"),
+        ):
+            value = record.info.get(key)
+            if value:
+                reward_parts.append(f"{label}={float(value):+.2f}")
+        click_penalty = record.info.get("click_gather_cycle_penalty")
+        if click_penalty:
+            reward_parts.append(f"interrupt={-float(click_penalty):+.2f}")
+        reward_parts_text = (
+            "" if not reward_parts else f" parts=[{' '.join(reward_parts)}]"
+        )
         observation_text = _format_observation(env, record.observation)
         print(
-            f"    step {record.step:2d}: {observation_text} {target}{distance_text} "
-            f"reward={record.reward:+.2f}"
+            f"    step {record.step:2d}: {observation_text} {target}{distance_text}"
+            f"{command_text}{stock_text}{carried_text}{reward_parts_text}"
+            f" reward={record.reward:+.2f}"
         )
+
+    return observe
+
+
+def _combine_decision_observers(
+    *observers: DecisionObserver | None,
+) -> DecisionObserver | None:
+    active = tuple(observer for observer in observers if observer is not None)
+    if not active:
+        return None
+
+    def observe(record):
+        for observer in active:
+            observer(record)
 
     return observe
 
@@ -136,9 +192,15 @@ def _print_report(report: EvaluationReport, mode_label: str) -> None:
     for result in report.episodes:
         distance = result.final_info.get("distance")
         distance_text = "" if distance is None else f" dist_final={float(distance):.1f}"
+        stock_delta = result.final_info.get("episode_resource_stock_delta")
+        stock_text = (
+            ""
+            if stock_delta is None
+            else f" stock_delta={float(stock_delta):.1f}"
+        )
         print(
             f"ep {result.episode:2d}: reward={result.total_reward:.1f}"
-            f"{distance_text} alcanzado={result.terminated}"
+            f"{distance_text}{stock_text} alcanzado={result.terminated}"
         )
     print(
         f"-- {report.episode_count} episodios ({mode_label}): "
@@ -188,6 +250,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--replay",
         action="store_true",
         help="ask 0 A.D. to save each evaluated episode as a replay",
+    )
+    parser.add_argument(
+        "--record-agent-view",
+        type=Path,
+        help=(
+            "write engine-rendered rollout frames and an HTML player to this directory"
+        ),
+    )
+    parser.add_argument(
+        "--record-agent-view-video",
+        type=Path,
+        help="encode recorded agent-view frames to this MP4 file with ffmpeg",
+    )
+    parser.add_argument(
+        "--allow-schematic-recording",
+        action="store_true",
+        help="fall back to schematic frames if the engine renderer cannot capture",
     )
     parser.add_argument(
         "--allow-remote-server",
@@ -251,7 +330,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             verbose=args.verbose,
             delay=0.0 if agent_view is not None else args.delay,
         )
-        decision_observer = (
+        view_observer = (
             None
             if agent_view is None
             else make_agent_view_observer(agent_view, delay=args.delay)
@@ -268,16 +347,49 @@ def main(argv: Sequence[str] | None = None) -> int:
             modes.append((False, "estocástica"))
 
         for deterministic, label in modes:
+            recording_dir = args.record_agent_view
+            if recording_dir is None and args.record_agent_view_video is not None:
+                recording_dir = args.record_agent_view_video.parent / (
+                    f"{args.record_agent_view_video.stem}-frames"
+                )
+            recorder = (
+                None
+                if recording_dir is None
+                else AgentViewRolloutRecorder(
+                    mode_recording_dir(
+                        recording_dir,
+                        deterministic=deterministic,
+                    ),
+                    env,
+                    fallback_to_schematic=args.allow_schematic_recording,
+                )
+            )
             report = evaluate(
                 env,
                 policy,
                 episodes=config.evaluation.episodes,
                 deterministic=deterministic,
                 seed=config.evaluation.seed,
-                decision_observer=decision_observer,
+                decision_observer=_combine_decision_observers(
+                    view_observer,
+                    None if recorder is None else recorder.observe,
+                ),
                 observer=observer,
             )
             _print_report(report, label)
+            if recorder is not None:
+                print(f"rollout: {recorder.write_index()}")
+                if args.record_agent_view_video is not None:
+                    video_path = (
+                        args.record_agent_view_video
+                        if len(modes) == 1
+                        else args.record_agent_view_video.with_name(
+                            f"{args.record_agent_view_video.stem}-"
+                            f"{'deterministic' if deterministic else 'stochastic'}"
+                            f"{args.record_agent_view_video.suffix}"
+                        )
+                    )
+                    print(f"video: {recorder.write_video(video_path)}")
     finally:
         try:
             if agent_view is not None:

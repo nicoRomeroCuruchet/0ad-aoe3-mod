@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+RUN_GAME = REPO_ROOT / "run_game.sh"
 
 
 def test_launcher_ignores_snap_xdg_data_home_and_registers_mod(tmp_path):
@@ -32,7 +33,7 @@ def test_launcher_ignores_snap_xdg_data_home_and_registers_mod(tmp_path):
     environment.pop("OAD_SDL_VIDEODRIVER", None)
     environment.pop("SDL_VIDEODRIVER", None)
     subprocess.run(
-        [REPO_ROOT / "run_game.sh", "-quickstart"],
+        [RUN_GAME, "-quickstart"],
         check=True,
         env=environment,
     )
@@ -59,7 +60,7 @@ def test_launcher_refuses_to_overwrite_an_existing_mod_directory(tmp_path):
     fake_appimage.chmod(0o755)
 
     result = subprocess.run(
-        [REPO_ROOT / "run_game.sh"],
+        [RUN_GAME],
         check=False,
         capture_output=True,
         text=True,
@@ -88,7 +89,7 @@ def test_launcher_allows_native_wayland_override(tmp_path):
     fake_appimage.chmod(0o755)
 
     subprocess.run(
-        [REPO_ROOT / "run_game.sh"],
+        [RUN_GAME],
         check=True,
         env={
             **os.environ,
@@ -121,7 +122,7 @@ def test_launcher_uses_full_appimage_unless_observer_is_requested(tmp_path):
     fake_observer.chmod(0o755)
 
     subprocess.run(
-        [REPO_ROOT / "run_game.sh"],
+        [RUN_GAME],
         check=True,
         env={
             **os.environ,
@@ -143,7 +144,7 @@ def test_launcher_requires_the_patched_binary_when_requested(tmp_path):
     fake_appimage.chmod(0o755)
 
     result = subprocess.run(
-        [REPO_ROOT / "run_game.sh", "--require-rl-observer"],
+        [RUN_GAME, "--require-rl-observer"],
         check=False,
         capture_output=True,
         text=True,
@@ -191,13 +192,14 @@ def test_launcher_mounts_appimage_data_for_the_patched_binary(tmp_path):
 
     subprocess.run(
         [
-            REPO_ROOT / "run_game.sh",
+            RUN_GAME,
             "--require-rl-observer",
             "--rl-interface=127.0.0.1:6000",
         ],
         check=True,
         env={
             **os.environ,
+            "DISPLAY": ":99",
             "HOME": str(home),
             "OAD_APPIMAGE": str(fake_appimage),
             "OAD_OBSERVER_BINARY": str(engine_binary),
@@ -211,6 +213,9 @@ def test_launcher_mounts_appimage_data_for_the_patched_binary(tmp_path):
         "-mod=public",
         "-mod=aoe3",
         "--rl-interface=127.0.0.1:6000",
+        "-xres=1024",
+        "-yres=768",
+        "-conf=windowed:true",
         "-conf=rendererbackend:gl",
     ]
     assert (engine_root / "data/config").resolve() == appdir / "usr/data/config"
@@ -218,6 +223,134 @@ def test_launcher_mounts_appimage_data_for_the_patched_binary(tmp_path):
     assert (
         engine_root / "data/mods/public"
     ).resolve() == appdir / "usr/data/mods/public"
+
+
+def test_launcher_wraps_observer_in_xvfb_when_x11_display_is_missing(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    appdir = tmp_path / "appdir"
+    for relative in ("usr/data/config", "usr/data/mods/mod", "usr/data/mods/public"):
+        (appdir / relative).mkdir(parents=True)
+
+    fake_appimage = tmp_path / "0ad.AppImage"
+    fake_appimage.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "${1:-}" == "--appimage-mount" ]]; then\n'
+        '  printf "%s\\n" "$FAKE_APPDIR"\n'
+        "  sleep 30\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 9\n",
+        encoding="utf-8",
+    )
+    fake_appimage.chmod(0o755)
+
+    engine_binary = tmp_path / "engine/binaries/system/pyrogenesis"
+    engine_binary.parent.mkdir(parents=True)
+    captured_arguments = tmp_path / "engine-arguments.txt"
+    engine_binary.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$CAPTURED_ARGUMENTS"\n',
+        encoding="utf-8",
+    )
+    engine_binary.chmod(0o755)
+
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    captured_xvfb = tmp_path / "xvfb-arguments.txt"
+    fake_xvfb = fake_bin / "xvfb-run"
+    fake_xvfb.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$@" > "$CAPTURED_XVFB"\n'
+        'while [[ "$#" -gt 0 ]]; do\n'
+        '  case "$1" in\n'
+        "    -a) shift ;;\n"
+        "    -s) shift 2 ;;\n"
+        "    --) shift; break ;;\n"
+        "    -*) shift ;;\n"
+        "    *) break ;;\n"
+        "  esac\n"
+        "done\n"
+        'exec "$@"\n',
+        encoding="utf-8",
+    )
+    fake_xvfb.chmod(0o755)
+
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "OAD_APPIMAGE": str(fake_appimage),
+        "OAD_OBSERVER_BINARY": str(engine_binary),
+        "FAKE_APPDIR": str(appdir),
+        "CAPTURED_ARGUMENTS": str(captured_arguments),
+        "CAPTURED_XVFB": str(captured_xvfb),
+        "PATH": f"{fake_bin}{os.pathsep}{os.environ['PATH']}",
+    }
+    environment.pop("DISPLAY", None)
+    environment.pop("OAD_SDL_VIDEODRIVER", None)
+
+    subprocess.run(
+        [RUN_GAME, "--require-rl-observer", "--rl-interface=127.0.0.1:6000"],
+        check=True,
+        env=environment,
+    )
+
+    assert captured_xvfb.read_text(encoding="utf-8").splitlines() == [
+        "-a",
+        "-s",
+        "-screen 0 1024x768x24",
+        str(engine_binary),
+        "-mod=mod",
+        "-mod=public",
+        "-mod=aoe3",
+        "--rl-interface=127.0.0.1:6000",
+        "-xres=1024",
+        "-yres=768",
+        "-conf=windowed:true",
+        "-conf=rendererbackend:gl",
+    ]
+    assert captured_arguments.read_text(encoding="utf-8").splitlines() == [
+        "-mod=mod",
+        "-mod=public",
+        "-mod=aoe3",
+        "--rl-interface=127.0.0.1:6000",
+        "-xres=1024",
+        "-yres=768",
+        "-conf=windowed:true",
+        "-conf=rendererbackend:gl",
+    ]
+
+
+def test_launcher_explains_missing_display_when_xvfb_is_disabled(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    fake_appimage = tmp_path / "0ad.AppImage"
+    fake_appimage.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    fake_appimage.chmod(0o755)
+    engine_binary = tmp_path / "engine/binaries/system/pyrogenesis"
+    engine_binary.parent.mkdir(parents=True)
+    engine_binary.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    engine_binary.chmod(0o755)
+
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "OAD_APPIMAGE": str(fake_appimage),
+        "OAD_OBSERVER_BINARY": str(engine_binary),
+        "OAD_OBSERVER_XVFB": "0",
+    }
+    environment.pop("DISPLAY", None)
+
+    result = subprocess.run(
+        [RUN_GAME, "--require-rl-observer"],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
+
+    assert result.returncode != 0
+    assert "No X11 display is available" in result.stderr
+    assert "xvfb" in result.stderr
 
 
 def test_launcher_rejects_a_second_observer_using_the_same_binary(tmp_path):
@@ -251,6 +384,7 @@ def test_launcher_rejects_a_second_observer_using_the_same_binary(tmp_path):
     release_engine = tmp_path / "release-engine"
     environment = {
         **os.environ,
+        "DISPLAY": ":99",
         "HOME": str(home),
         "OAD_APPIMAGE": str(fake_appimage),
         "OAD_OBSERVER_BINARY": str(engine_binary),
@@ -260,7 +394,7 @@ def test_launcher_rejects_a_second_observer_using_the_same_binary(tmp_path):
         "RELEASE_ENGINE": str(release_engine),
     }
     first = subprocess.Popen(
-        [REPO_ROOT / "run_game.sh", "--require-rl-observer"],
+        [RUN_GAME, "--require-rl-observer"],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -273,7 +407,7 @@ def test_launcher_rejects_a_second_observer_using_the_same_binary(tmp_path):
         assert engine_started.exists()
 
         second = subprocess.run(
-            [REPO_ROOT / "run_game.sh", "--require-rl-observer"],
+            [RUN_GAME, "--require-rl-observer"],
             check=False,
             capture_output=True,
             text=True,

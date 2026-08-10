@@ -3,7 +3,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OAD_APPIMAGE="${OAD_APPIMAGE:-$REPO_ROOT/.runtime/0ad/0ad.AppImage}"
+DEFAULT_OAD_APPIMAGE="$REPO_ROOT/.runtime/0ad/0ad.AppImage"
+FALLBACK_OAD_APPIMAGE="/mnt/data/Games/0ad/0ad-0.28.0-x86_64.AppImage"
+OAD_APPIMAGE="${OAD_APPIMAGE:-$DEFAULT_OAD_APPIMAGE}"
+if [[ "$OAD_APPIMAGE" == "$DEFAULT_OAD_APPIMAGE" && ! -x "$OAD_APPIMAGE" && -x "$FALLBACK_OAD_APPIMAGE" ]]; then
+	OAD_APPIMAGE="$FALLBACK_OAD_APPIMAGE"
+fi
 OAD_OBSERVER_BINARY="${OAD_OBSERVER_BINARY:-$REPO_ROOT/.runtime/0ad-observer/source/0ad-0.28.0/binaries/system/pyrogenesis}"
 
 if [ ! -x "$OAD_APPIMAGE" ]; then
@@ -43,6 +48,32 @@ if [[ ! -x "$OAD_OBSERVER_BINARY" ]]; then
 	printf '%s\n' \
 		'Patched 0 A.D. observer engine not found. Run `make engine-observer` first.' >&2
 	exit 1
+fi
+
+observer_prefix=()
+if [[ "$SDL_VIDEODRIVER" == "x11" && -z "${DISPLAY:-}" ]]; then
+	if [[ "${OAD_OBSERVER_XVFB:-auto}" == "0" ]]; then
+		printf '%s\n' \
+			'No X11 display is available for the observer engine.' \
+			'Run from a graphical session, install `xvfb` for headless use, or set OAD_SDL_VIDEODRIVER=wayland when native Wayland is available.' >&2
+		exit 1
+	fi
+	if ! command -v xvfb-run >/dev/null 2>&1; then
+		printf '%s\n' \
+			'No X11 display is available for the observer engine, and `xvfb-run` was not found.' \
+			'Install it with: sudo apt install xvfb' \
+			'Then rerun: make server' >&2
+		exit 1
+	fi
+	observer_prefix=(xvfb-run -a -s "${OAD_XVFB_SERVER_ARGS:--screen 0 1024x768x24}")
+fi
+observer_window_args=()
+if [[ "${OAD_OBSERVER_WINDOW_ARGS:-auto}" != "0" ]]; then
+	if [[ "${OAD_OBSERVER_WINDOW_ARGS:-auto}" == "auto" ]]; then
+		observer_window_args=(-xres=1024 -yres=768 -conf=windowed:true)
+	else
+		read -r -a observer_window_args <<< "$OAD_OBSERVER_WINDOW_ARGS"
+	fi
 fi
 
 binary_root="$(cd "$(dirname "$OAD_OBSERVER_BINARY")/.." && pwd)"
@@ -105,8 +136,8 @@ done
 
 export LD_LIBRARY_PATH="$binary_root/system${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 set +e
-"$OAD_OBSERVER_BINARY" -mod=mod -mod=public -mod=aoe3 \
-	"${forwarded_args[@]}" -conf=rendererbackend:gl
+"${observer_prefix[@]}" "$OAD_OBSERVER_BINARY" -mod=mod -mod=public -mod=aoe3 \
+	"${forwarded_args[@]}" "${observer_window_args[@]}" -conf=rendererbackend:gl
 status=$?
 set -e
 exit "$status"
