@@ -196,13 +196,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"run: {artifacts.run_dir}", flush=True)
     print(f"training_logs: {artifacts.training_log_dir}", flush=True)
     print(f"best_model: {best_model_path}", flush=True)
-    env = build_environment(
-        config.environment,
-        allow_remote=args.allow_remote_server,
+    metadata = {
+        "agent": config.agent.name,
+        "experiment_file": str(args.experiment),
+        "model_path": str(model_path),
+        "best_model_path": str(best_model_path),
+        "resume_from": None if args.resume_from is None else str(args.resume_from),
+        "python": platform.python_version(),
+        "training_log_dir": str(artifacts.training_log_dir),
+    }
+    record_run_context(
+        artifacts,
+        config,
+        metadata={**metadata, "status": "running"},
     )
 
+    env: object | None = None
     agent_view: AgentView | None = None
+    checkpoint_saved = False
     try:
+        env = build_environment(
+            config.environment,
+            allow_remote=args.allow_remote_server,
+        )
         if args.agent_view:
             try:
                 agent_view = open_agent_view(env)
@@ -223,23 +239,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         model_path.parent.mkdir(parents=True, exist_ok=True)
         save_policy(config.agent, policy, model_path)
-        metadata = {
-            "agent": config.agent.name,
-            "experiment_file": str(args.experiment),
-            "model_path": str(model_path),
-            "best_model_path": str(best_model_path),
-            "resume_from": None if args.resume_from is None else str(args.resume_from),
-        }
         record_run_context(
             artifacts,
             config,
             metadata={
                 **metadata,
-                "python": platform.python_version(),
-                "training_log_dir": str(artifacts.training_log_dir),
                 "status": "checkpoint_saved",
             },
         )
+        checkpoint_saved = True
         report = evaluate(
             env,
             policy,
@@ -254,17 +262,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             config,
             metadata={
                 **metadata,
-                "python": platform.python_version(),
-                "training_log_dir": str(artifacts.training_log_dir),
                 "status": "complete",
             },
         )
+    except BaseException as error:
+        if not checkpoint_saved:
+            status = "interrupted" if isinstance(error, KeyboardInterrupt) else "failed"
+            record_run_context(
+                artifacts,
+                config,
+                metadata={
+                    **metadata,
+                    "status": status,
+                    "error_type": type(error).__name__,
+                },
+            )
+        raise
     finally:
         try:
             if agent_view is not None:
                 agent_view.close()
         finally:
-            _close_environment(env)
+            if env is not None:
+                _close_environment(env)
 
     print(f"modelo: {model_path}")
     print(

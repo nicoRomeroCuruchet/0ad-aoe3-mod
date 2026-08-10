@@ -147,6 +147,8 @@ make m1-train MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/best_model \
 
 Cada corrida crea una carpeta ignorada por git en `rl/runs/` con el modelo, la config resuelta,
 las métricas por episodio y metadata. El comando imprime la ruta exacta al terminar.
+La config y `status=running` se escriben al crear la corrida; un fallo previo al checkpoint queda
+marcado como `failed` o `interrupted` en vez de dejar un directorio vacío.
 El modelo se guarda **antes** de la evaluación final: si el server se corta durante esa etapa,
 el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente salvo que agregues
 `--force`.

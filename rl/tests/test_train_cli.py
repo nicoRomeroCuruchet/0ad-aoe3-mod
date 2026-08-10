@@ -136,6 +136,12 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
     events = []
 
     def fake_build_environment(config, **kwargs):
+        run_directory = next((tmp_path / "runs").iterdir())
+        initial_metadata = json.loads(
+            (run_directory / "metadata.json").read_text(encoding="utf-8")
+        )
+        assert initial_metadata["status"] == "running"
+        assert (run_directory / "resolved_config.json").is_file()
         calls["environment"] = (config, kwargs)
         return env
 
@@ -546,7 +552,9 @@ def test_main_does_not_train_when_agent_view_cannot_open(
     assert events == ["open_view"]
     assert env.closed is True
     run_directory = next((tmp_path / "runs").iterdir())
-    assert not (run_directory / "metadata.json").exists()
+    metadata = json.loads((run_directory / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["status"] == "failed"
+    assert metadata["error_type"] == "SystemExit"
     assert not (run_directory / "metrics.json").exists()
 
 
