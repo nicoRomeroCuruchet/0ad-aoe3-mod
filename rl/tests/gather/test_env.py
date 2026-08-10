@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from rl.gather.env import ZeroADGatherEnv
+from rl.gather.zero_ad_client import BatchedZeroAD
 
 
 def test_injected_backend_supports_reset_and_step_without_zero_ad(fake_backend):
@@ -44,6 +45,37 @@ def test_injected_backend_supports_reset_and_step_without_zero_ad(fake_backend):
     assert actions.walk_calls == [([game.initial_state.villager], 100.0, 100.0)]
     command = ("walk", (game.initial_state.villager,), 100.0, 100.0)
     assert game.step_calls == [None, [command], None, None]
+
+
+def test_step_uses_backend_batch_capability(fake_backend):
+    game, actions = fake_backend
+    batch_calls = []
+
+    def step_many(commands=None, *, turns):
+        batch_calls.append((commands, turns))
+        game.current_state = game.state_after_action
+        return game.current_state
+
+    game.step_many = step_many
+    env = ZeroADGatherEnv(
+        "scenario contents",
+        map_size_m=200.0,
+        horizon=2,
+        reach_threshold=80.0,
+        sim_steps_per_action=3,
+        game=game,
+        actions=actions,
+    )
+    env.reset()
+
+    observation, reward, terminated, _, _ = env.step([0.0, 0.0])
+
+    command = ("walk", (game.initial_state.villager,), 100.0, 100.0)
+    assert batch_calls == [([command], 3)]
+    assert game.step_calls == [None]
+    assert np.allclose(observation, [-0.75, -1.0, 0.0, -1.0, 0.375])
+    assert reward == 25.0
+    assert terminated is True
 
 
 def test_horizon_truncates_an_unfinished_episode(fake_backend):
@@ -232,6 +264,7 @@ def test_resource_state_observation_includes_carried_wood_and_stock(fake_backend
     assert env.observation_labels[-2:] == ("carried_wood_norm", "stock_wood_norm")
     assert np.allclose(observation, [-1.0, -1.0, 0.0, -1.0, 0.5, 0.0, 0.3])
     assert info["resource_stock"] == 300.0
+    assert len(game.evaluate_calls) == 1
 
     observation, reward, terminated, truncated, info = env.step([0.0, -1.0])
 
@@ -240,6 +273,7 @@ def test_resource_state_observation_includes_carried_wood_and_stock(fake_backend
     assert terminated is False
     assert truncated is False
     assert info["resource_stock"] == 320.0
+    assert len(game.evaluate_calls) == 2
 
 
 def test_stock_delta_reward_unlocks_gather_cycle_after_stock_increase(fake_backend):
@@ -531,7 +565,7 @@ def test_default_backend_reports_how_to_run_without_zero_ad(monkeypatch):
         ZeroADGatherEnv("scenario contents")
 
 
-def test_default_backend_preserves_zero_ad_client_construction(monkeypatch):
+def test_default_backend_wraps_the_zero_ad_client_for_batched_steps(monkeypatch):
     created_uris = []
     default_game = object()
     default_actions = object()
@@ -542,11 +576,13 @@ def test_default_backend_preserves_zero_ad_client_construction(monkeypatch):
         return default_game
 
     zero_ad.ZeroAD = create_game
+    zero_ad.GameState = object
     zero_ad.actions = default_actions
     monkeypatch.setitem(sys.modules, "zero_ad", zero_ad)
 
     env = ZeroADGatherEnv("scenario contents", uri="http://localhost:7000")
 
     assert created_uris == ["http://localhost:7000"]
-    assert env.game is default_game
+    assert isinstance(env.game, BatchedZeroAD)
+    assert env.game._game is default_game
     assert env.actions is default_actions

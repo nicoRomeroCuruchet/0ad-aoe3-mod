@@ -1,0 +1,143 @@
+diff --git a/source/rlinterface/RLInterface.cpp b/source/rlinterface/RLInterface.cpp
+index dd08518..9182c84 100644
+--- a/source/rlinterface/RLInterface.cpp
++++ b/source/rlinterface/RLInterface.cpp
+@@ -58,5 +58,6 @@ constexpr float OBSERVER_NEAR_PLANE = 1.0f;
+ constexpr float OBSERVER_FAR_PLANE = 1024.0f;
+ constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v1";
++constexpr u32 MAX_BATCHED_TURNS = 10000;
+ 
+ bool ParseObserverEntity(const char* queryString, entity_id_t& entity)
+ {
+@@ -82,6 +83,28 @@ bool ParseObserverEntity(const char* queryString, entity_id_t& entity)
+ 	return true;
+ }
+ 
++bool ParseTurnCount(const char* queryString, u32& turns)
++{
++	if (!queryString)
++		return false;
++
++	char value[16]{};
++	const size_t queryLength = strlen(queryString);
++	const int length = mg_get_var(
++		queryString, queryLength, "turns", value, sizeof(value));
++	if (length <= 0 || static_cast<size_t>(length) >= sizeof(value))
++		return false;
++
++	u32 parsed = 0;
++	const auto result = std::from_chars(value, value + length, parsed);
++	if (result.ec != std::errc{} || result.ptr != value + length ||
++		parsed == 0 || parsed > MAX_BATCHED_TURNS)
++		return false;
++
++	turns = parsed;
++	return true;
++}
++
+ std::string MakePPM(const std::vector<u8>& bottomUpRGB)
+ {
+ 	std::ostringstream header;
+@@ -139,10 +162,10 @@ std::string Interface::SendGameMessage(GameMessage&& msg)
+ 	return m_ReturnValue;
+ }
+ 
+-std::string Interface::Step(std::vector<GameCommand>&& commands)
++std::string Interface::Step(std::vector<GameCommand>&& commands, const u32 turns)
+ {
+ 	std::lock_guard<std::mutex> lock(m_Lock);
+-	return SendGameMessage({ GameMessageType::Commands, std::move(commands) });
++	return SendGameMessage({GameMessageType::Commands, std::move(commands), INVALID_ENTITY, turns});
+ }
+ 
+ std::string Interface::Reset(ScenarioConfig&& scenario)
+@@ -226,6 +249,11 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+ 		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
+ 		"The engine observer is unavailable. Use the OpenGL renderer and keep the game window visible.";
+ 
++	const char* invalidTurnCount =
++		"HTTP/1.1 400 Bad Request\r\n"
++		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
++		"Batched step requests require turns in the range 1..10000.";
++
+ 	switch (event)
+ 	{
+ 	case MG_NEW_REQUEST:
+@@ -265,7 +294,7 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+ 
+ 			stream << gameState.c_str();
+ 		}
+-		else if (uri == "/step")
++		else if (uri == "/step" || uri == "/step_n")
+ 		{
+ 			if (!interface->IsGameRunning())
+ 			{
+@@ -274,6 +303,14 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+ 				return handled;
+ 			}
+ 
++			u32 turns = 1;
++			if (uri == "/step_n" &&
++				!ParseTurnCount(request_info->query_string, turns))
++			{
++				mg_printf(conn, "%s", invalidTurnCount);
++				return handled;
++			}
++
+ 			std::string data = GetRequestContent(conn);
+ 			std::stringstream postStream(data);
+ 			std::string line;
+@@ -292,7 +329,7 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+ 				cmd.json_cmd = line.substr(splitPos + 1);
+ 				commands.push_back(std::move(cmd));
+ 			}
+-			const std::string gameState = interface->Step(std::move(commands));
++			const std::string gameState = interface->Step(std::move(commands), turns);
+ 			if (gameState.empty())
+ 			{
+ 				mg_printf(conn, "%s", notRunningResponse);
+@@ -531,14 +568,17 @@ void Interface::ApplyMessage(const GameMessage& msg)
+ 			}
+ 
+ 			const u32 deltaRealTime = DEFAULT_TURN_LENGTH;
+-			if (nonVisual)
++			for (u32 turn = 0; turn < msg.turns; ++turn)
+ 			{
+-				const double deltaSimTime = deltaRealTime * g_Game->GetSimRate();
+-				const size_t maxTurns = static_cast<size_t>(g_Game->GetSimRate());
+-				g_Game->GetTurnManager()->Update(deltaSimTime, maxTurns);
++				if (nonVisual)
++				{
++					const double deltaSimTime = deltaRealTime * g_Game->GetSimRate();
++					const size_t maxTurns = static_cast<size_t>(g_Game->GetSimRate());
++					g_Game->GetTurnManager()->Update(deltaSimTime, maxTurns);
++				}
++				else
++					g_Game->Update(deltaRealTime);
+ 			}
+-			else
+-				g_Game->Update(deltaRealTime);
+ 
+ 			m_ReturnValue = GetGameState();
+ 			m_MsgApplied.notify_one();
+diff --git a/source/rlinterface/RLInterface.h b/source/rlinterface/RLInterface.h
+index 805f0ec..928be0a 100644
+--- a/source/rlinterface/RLInterface.h
++++ b/source/rlinterface/RLInterface.h
+@@ -64,6 +64,7 @@ struct GameMessage
+ 	GameMessageType type;
+ 	std::vector<GameCommand> commands;
+ 	entity_id_t observerEntity = INVALID_ENTITY;
++	u32 turns = 1;
+ };
+ 
+ struct SetupError : std::exception
+@@ -115,7 +116,7 @@ private:
+ 	 * Process commands, update the simulation by one turn.
+ 	 * @return the gamestate after processing commands.
+ 	 */
+-	std::string Step(std::vector<GameCommand>&& commands);
++	std::string Step(std::vector<GameCommand>&& commands, u32 turns);
+ 
+ 	/**
+ 	 * Reset the game state according to scenario, cleaning up existing games if required.

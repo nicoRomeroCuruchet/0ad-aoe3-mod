@@ -16,6 +16,7 @@ from rl.gather.env import ZeroADGatherEnv
 
 OBSERVER_PATCH = Path("engine/patches/0ad-v0.28.0-agent-observer.patch")
 THROUGHPUT_PATCH = Path("engine/patches/0ad-v0.28.0-rl-throughput.patch")
+STEP_BATCH_PATCH = Path("engine/patches/0ad-v0.28.0-step-batching.patch")
 
 
 class FakeResponse:
@@ -110,6 +111,15 @@ def test_nonvisual_engine_waits_for_rl_reset_without_an_autostart_map():
 
     assert 'return Autostart(args) || args.Has("rl-interface");' in patch
     assert "0ad-v0.28.0-rl-throughput.patch" in builder
+
+
+def test_engine_batch_route_is_distinct_and_bounded():
+    patch = STEP_BATCH_PATCH.read_text()
+    builder = Path("engine/build_observer.sh").read_text()
+
+    assert 'uri == "/step_n"' in patch
+    assert "MAX_BATCHED_TURNS = 10000" in patch
+    assert "0ad-v0.28.0-step-batching.patch" in builder
 
 
 def test_engine_patch_pins_observer_los_then_restores_the_viewed_player():

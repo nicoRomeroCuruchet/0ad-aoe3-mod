@@ -15,6 +15,7 @@ import numpy as np
 from gymnasium import spaces
 
 from .engine_observer import EngineObserverClient, EngineObserverUnavailable
+from .zero_ad_client import BatchedZeroAD
 from .core import (
     GATHER_OBSERVATION_LABELS,
     GATHER_RESOURCE_OBSERVATION_LABELS,
@@ -67,6 +68,33 @@ def unit_carried_resource_expression(entity_id: int, resource: str) -> str:
     )
 
 
+def resource_snapshot_expression(
+    player_id: int,
+    entity_id: int,
+    resource: str,
+) -> str:
+    resource_literal = json.dumps(resource)
+    return (
+        "(() => { "
+        "const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, "
+        "IID_PlayerManager); "
+        f"const playerEntity = cmpPlayerManager.GetPlayerByID({int(player_id)}); "
+        "const cmpPlayer = Engine.QueryInterface(playerEntity, IID_Player); "
+        "const stock = cmpPlayer.GetResourceCounts(); "
+        f"const cmpGatherer = Engine.QueryInterface({int(entity_id)}, "
+        "IID_ResourceGatherer); "
+        "let carried = 0; "
+        "if (cmpGatherer) for (const item of cmpGatherer.GetCarryingStatus()) { "
+        "const itemType = item.type || item.generic || item.resource || ''; "
+        f"if (itemType === {resource_literal} || "
+        f"itemType.split('.')[0] === {resource_literal}) "
+        "carried += +(item.amount || 0); "
+        "} "
+        "return { stock, carried }; "
+        "})()"
+    )
+
+
 def _load_zero_ad():
     try:
         return importlib.import_module("zero_ad")
@@ -81,7 +109,8 @@ def _load_zero_ad():
 
 def _default_backend_factory(uri: str) -> tuple[Any, Any]:
     zero_ad = _load_zero_ad()
-    return zero_ad.ZeroAD(uri), zero_ad.actions
+    game = BatchedZeroAD(zero_ad.ZeroAD(uri), zero_ad.GameState)
+    return game, zero_ad.actions
 
 
 def _resolve_backend(
@@ -394,6 +423,27 @@ class ZeroADGatherEnv(gym.Env):
             self.stock_resource,
         )
 
+    def _resource_snapshot(self, villager) -> tuple[float, float]:
+        evaluate = getattr(self.game, "evaluate", None)
+        entity_id = getattr(villager, "id", None)
+        if not callable(evaluate) or not callable(entity_id):
+            raise RuntimeError(
+                "resource state requires game.evaluate(js) and unit.id()"
+            )
+        value = evaluate(
+            resource_snapshot_expression(
+                self.stock_player,
+                entity_id(),
+                self.stock_resource,
+            )
+        )
+        if not isinstance(value, Mapping) or "stock" not in value or "carried" not in value:
+            raise TypeError("resource snapshot must contain stock and carried values")
+        return (
+            _extract_stock(value["stock"], self.stock_resource),
+            _extract_carried_resource(value["carried"], self.stock_resource),
+        )
+
     def _tracks_carried_resource(self) -> bool:
         return bool(
             self.resource_state_observation
@@ -491,11 +541,18 @@ class ZeroADGatherEnv(gym.Env):
         self._finish_gather_cycle()
         self._prev_carried_resource = 0.0
         carried_resource = None
-        if self._tracks_carried_resource():
+        resource_stock = None
+        tracks_carried_resource = self._tracks_carried_resource()
+        if self.reward_mode == REWARD_STOCK_DELTA and tracks_carried_resource:
+            resource_stock, carried_resource = self._resource_snapshot(villager)
+            self._prev_carried_resource = carried_resource
+        elif tracks_carried_resource:
             carried_resource = self._carried_resource(villager)
             self._prev_carried_resource = carried_resource
         if self.reward_mode == REWARD_STOCK_DELTA:
-            self._initial_stock = self._resource_stock()
+            self._initial_stock = (
+                self._resource_stock() if resource_stock is None else resource_stock
+            )
             self._prev_stock = self._initial_stock
             info = {
                 "distance": self._prev_dist,
@@ -635,9 +692,14 @@ class ZeroADGatherEnv(gym.Env):
 
     def _step_once(self, action):
         cmd, command_name, command_info = self._command_for_action(action)
-        state = self.game.step() if cmd is None else self.game.step([cmd])
-        for _ in range(self.sim_steps_per_action - 1):
-            state = self.game.step()
+        commands = None if cmd is None else [cmd]
+        step_many = getattr(self.game, "step_many", None)
+        if callable(step_many):
+            state = step_many(commands, turns=self.sim_steps_per_action)
+        else:
+            state = self.game.step(commands)
+            for _ in range(self.sim_steps_per_action - 1):
+                state = self.game.step()
         v, r = self._positions(state)
         villager = self._entities(state)[0]
         cur_dist = distance(v, r)
@@ -647,13 +709,16 @@ class ZeroADGatherEnv(gym.Env):
             "reward_mode": self.reward_mode,
         }
         if self.reward_mode == REWARD_STOCK_DELTA:
-            cur_stock = self._resource_stock()
+            tracks_carried_resource = self._tracks_carried_resource()
+            if tracks_carried_resource:
+                cur_stock, cur_carried_resource = self._resource_snapshot(villager)
+            else:
+                cur_stock = self._resource_stock()
+                cur_carried_resource = None
             stock_reward = stock_delta_reward(self._prev_stock, cur_stock)
             self._prev_stock = cur_stock
-            cur_carried_resource = None
             carried_resource_delta = 0.0
-            if self._tracks_carried_resource():
-                cur_carried_resource = self._carried_resource(villager)
+            if tracks_carried_resource:
                 carried_resource_delta = max(
                     0.0,
                     cur_carried_resource - self._prev_carried_resource,

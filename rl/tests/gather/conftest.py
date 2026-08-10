@@ -54,6 +54,10 @@ class FakeGame:
 
     def evaluate(self, expression):
         self.evaluate_calls.append(expression)
+        if "GetResourceCounts" in expression and "GetCarryingStatus" in expression:
+            stock = self.stock_values.pop(0) if self.stock_values else 0.0
+            carried = self.carried_values.pop(0) if self.carried_values else 0.0
+            return {"stock": {"wood": stock}, "carried": carried}
         if "GetCarryingStatus" in expression:
             return self.carried_values.pop(0) if self.carried_values else 0.0
         return {"wood": self.stock_values.pop(0) if self.stock_values else 0.0}

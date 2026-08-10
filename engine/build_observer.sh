@@ -10,6 +10,7 @@ SOURCE_ROOT="$RUNTIME_ROOT/source"
 SOURCE_DIR="$SOURCE_ROOT/0ad-0.28.0"
 PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-agent-observer.patch"
 THROUGHPUT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-throughput.patch"
+STEP_BATCH_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-step-batching.patch"
 SOURCE_URL="https://releases.wildfiregames.com/$ARCHIVE_NAME"
 SOURCE_SHA256="27e217755ef76a922fe58dbf593d96e54b6ed2375d23f548c35619aa6bd5a42a"
 RUSTUP_VERSION="1.28.2"
@@ -117,6 +118,7 @@ apply_engine_patch() {
 
 apply_engine_patch "$PATCH_FILE"
 apply_engine_patch "$THROUGHPUT_PATCH_FILE"
+apply_engine_patch "$STEP_BATCH_PATCH_FILE"
 
 # Release 28 needs Python 3.11 for its bundled SpiderMonkey build. Reuse the
 # repository runtime installed by setup.sh when available.
