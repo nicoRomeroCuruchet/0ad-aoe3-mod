@@ -17,6 +17,7 @@ from rl.gather.env import ZeroADGatherEnv
 OBSERVER_PATCH = Path("engine/patches/0ad-v0.28.0-agent-observer.patch")
 THROUGHPUT_PATCH = Path("engine/patches/0ad-v0.28.0-rl-throughput.patch")
 STEP_BATCH_PATCH = Path("engine/patches/0ad-v0.28.0-step-batching.patch")
+IDLE_WAIT_PATCH = Path("engine/patches/0ad-v0.28.0-rl-idle-wait.patch")
 
 
 class FakeResponse:
@@ -113,6 +114,15 @@ def test_nonvisual_engine_waits_for_rl_reset_without_an_autostart_map():
     assert "0ad-v0.28.0-rl-throughput.patch" in builder
 
 
+def test_nonvisual_rl_server_does_not_busy_spin_between_requests():
+    patch = IDLE_WAIT_PATCH.read_text()
+    builder = Path("engine/build_observer.sh").read_text()
+
+    assert "rlInterface->TryApplyMessage();" in patch
+    assert "SDL_Delay(1);" in patch
+    assert "0ad-v0.28.0-rl-idle-wait.patch" in builder
+
+
 def test_engine_batch_route_is_distinct_and_bounded():
     patch = STEP_BATCH_PATCH.read_text()
     builder = Path("engine/build_observer.sh").read_text()
@@ -120,6 +130,16 @@ def test_engine_batch_route_is_distinct_and_bounded():
     assert 'uri == "/step_n"' in patch
     assert "MAX_BATCHED_TURNS = 10000" in patch
     assert "0ad-v0.28.0-step-batching.patch" in builder
+
+
+def test_engine_builder_recognizes_applied_features_after_context_changes():
+    builder = Path("engine/build_observer.sh").read_text()
+
+    assert '"RenderObserverFrame"' in builder
+    assert 'args.Has(\\"rl-interface\\")' in builder
+    assert '"MAX_BATCHED_TURNS"' in builder
+    assert 'grep --fixed-strings --quiet "$feature_marker"' in builder
+    assert 'sha256sum "$patch_file"' in builder
 
 
 def test_engine_patch_pins_observer_los_then_restores_the_viewed_player():
@@ -202,6 +222,7 @@ def test_observer_image_response_does_not_opt_into_browser_cors():
 
 def test_observer_builder_skips_unneeded_debug_spidermonkey():
     builder = Path("engine/build_observer.sh").read_text()
+    launcher = Path("run_game.sh").read_text()
     patch = OBSERVER_PATCH.read_text()
 
     assert "export BUILD_RELEASE_ONLY=1" in builder
@@ -212,6 +233,8 @@ def test_observer_builder_skips_unneeded_debug_spidermonkey():
     assert "download_verified" in builder
     assert ".observer-source-ready" in builder
     assert ".observer-build.lock" in builder
+    assert ".agent-observer.lock" in builder
+    assert ".agent-observer.lock" in launcher
     assert 'flock --nonblock "$builder_lock_fd"' in builder
     assert '[[ "$rustc_version" != "rustc $RUST_TOOLCHAIN "' in builder
     assert '[[ "$cbindgen_version" != "cbindgen 0.29.0"' in builder

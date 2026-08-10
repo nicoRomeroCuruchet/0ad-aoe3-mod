@@ -11,6 +11,7 @@ SOURCE_DIR="$SOURCE_ROOT/0ad-0.28.0"
 PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-agent-observer.patch"
 THROUGHPUT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-throughput.patch"
 STEP_BATCH_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-step-batching.patch"
+IDLE_WAIT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-idle-wait.patch"
 SOURCE_URL="https://releases.wildfiregames.com/$ARCHIVE_NAME"
 SOURCE_SHA256="27e217755ef76a922fe58dbf593d96e54b6ed2375d23f548c35619aa6bd5a42a"
 RUSTUP_VERSION="1.28.2"
@@ -101,24 +102,66 @@ if [[ ! -f "$SOURCE_MARKER" ]]; then
 	touch "$SOURCE_MARKER"
 fi
 
+# Do not relink the executable while a server is running from this source tree.
+exec {observer_lock_fd}>"$SOURCE_DIR/binaries/.agent-observer.lock"
+if ! flock --nonblock "$observer_lock_fd"; then
+	printf 'The patched observer engine is running from %s; stop it before rebuilding.\n' \
+		"$SOURCE_DIR" >&2
+	exit 1
+fi
+
 apply_engine_patch() {
 	local patch_file="$1"
+	local feature_file="$2"
+	local feature_marker="$3"
+	local patch_name
+	local patch_checksum
+	local stamp_file
+	local stamped_checksum=""
+
+	patch_name="$(basename "$patch_file")"
+	patch_checksum="$(sha256sum "$patch_file" | cut -d ' ' -f 1)"
+	stamp_file="$SOURCE_DIR/.${patch_name}.sha256"
+	if [[ -f "$stamp_file" ]]; then
+		read -r stamped_checksum < "$stamp_file"
+		if [[ "$stamped_checksum" == "$patch_checksum" ]]; then
+			printf '%s is already applied.\n' "$patch_name"
+			return
+		fi
+		printf 'Cached source has a different version of %s; remove %s and rebuild.\n' \
+			"$patch_name" "$SOURCE_DIR" >&2
+		exit 1
+	fi
+
 	if patch --batch --forward --directory "$SOURCE_DIR" --strip 1 \
 		--dry-run --silent < "$patch_file" >/dev/null 2>&1; then
 		patch --batch --forward --directory "$SOURCE_DIR" --strip 1 < "$patch_file"
+		printf '%s\n' "$patch_checksum" > "$stamp_file"
 	elif patch --batch --forward --directory "$SOURCE_DIR" --strip 1 \
 		--reverse --dry-run --silent < "$patch_file" >/dev/null 2>&1; then
-		printf '%s is already applied.\n' "$(basename "$patch_file")"
+		printf '%s\n' "$patch_checksum" > "$stamp_file"
+		printf '%s is already applied.\n' "$patch_name"
+	elif grep --fixed-strings --quiet "$feature_marker" \
+		"$SOURCE_DIR/$feature_file"; then
+		# Migrate source trees patched by older versions of this builder. A later
+		# patch may have changed enough context that reverse dry-run no longer works.
+		printf '%s\n' "$patch_checksum" > "$stamp_file"
+		printf '%s is already applied.\n' "$patch_name"
 	else
 		printf '%s does not apply cleanly to %s\n' \
-			"$(basename "$patch_file")" "$SOURCE_DIR" >&2
+			"$patch_name" "$SOURCE_DIR" >&2
 		exit 1
 	fi
 }
 
-apply_engine_patch "$PATCH_FILE"
-apply_engine_patch "$THROUGHPUT_PATCH_FILE"
-apply_engine_patch "$STEP_BATCH_PATCH_FILE"
+apply_engine_patch "$PATCH_FILE" \
+	"source/rlinterface/RLInterface.cpp" "RenderObserverFrame"
+apply_engine_patch "$THROUGHPUT_PATCH_FILE" \
+	"source/ps/GameSetup/GameSetup.cpp" "args.Has(\"rl-interface\")"
+apply_engine_patch "$STEP_BATCH_PATCH_FILE" \
+	"source/rlinterface/RLInterface.cpp" "MAX_BATCHED_TURNS"
+apply_engine_patch "$IDLE_WAIT_PATCH_FILE" \
+	"source/main.cpp" "SDL_Delay(1);"
 
 # Release 28 needs Python 3.11 for its bundled SpiderMonkey build. Reuse the
 # repository runtime installed by setup.sh when available.

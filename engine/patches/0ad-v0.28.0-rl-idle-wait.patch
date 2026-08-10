@@ -1,0 +1,16 @@
+diff --git a/source/main.cpp b/source/main.cpp
+--- a/source/main.cpp
++++ b/source/main.cpp
+@@ -760,8 +760,11 @@ void RunGameOrAtlas(int argc, const char* argv[])
+ #else
+ 					Frame(rlInterface ? &*rlInterface : nullptr, fixedFrameFrequency);
+ #endif
+-				else if(rlInterface)
++				else if (rlInterface)
++				{
+ 					rlInterface->TryApplyMessage();
++					SDL_Delay(1);
++				}
+ 				else
+ 					NonVisualFrame();
+ 			}
