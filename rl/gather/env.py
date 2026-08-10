@@ -532,8 +532,13 @@ class ZeroADGatherEnv(gym.Env):
 
     def _reset_once(self, *, seed=None):
         super().reset(seed=seed)
-        self.game.reset(self.scenario_config, save_replay=self.save_replay)
-        state = self.game.step()  # un tick para que las entidades existan
+        state = self.game.reset(
+            self.scenario_config,
+            save_replay=self.save_replay,
+        )
+        if state is None:
+            # Compatibility for injected backends predating reset-state returns.
+            state = self.game.step()
         v, r = self._positions(state)
         villager = self._entities(state)[0]
         self._prev_dist = distance(v, r)

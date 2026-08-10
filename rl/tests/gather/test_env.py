@@ -27,7 +27,7 @@ def test_injected_backend_supports_reset_and_step_without_zero_ad(fake_backend):
     assert observation.dtype == np.float32
     assert np.allclose(observation, [-1.0, -1.0, 0.0, -1.0, 0.5])
     assert game.reset_calls == [("scenario contents", True)]
-    assert game.step_calls == [None]
+    assert game.step_calls == []
 
     observation, reward, terminated, truncated, info = env.step(
         np.array([0.0, 0.0], dtype=np.float32)
@@ -44,7 +44,7 @@ def test_injected_backend_supports_reset_and_step_without_zero_ad(fake_backend):
     }
     assert actions.walk_calls == [([game.initial_state.villager], 100.0, 100.0)]
     command = ("walk", (game.initial_state.villager,), 100.0, 100.0)
-    assert game.step_calls == [None, [command], None, None]
+    assert game.step_calls == [[command], None, None]
 
 
 def test_step_uses_backend_batch_capability(fake_backend):
@@ -72,7 +72,7 @@ def test_step_uses_backend_batch_capability(fake_backend):
 
     command = ("walk", (game.initial_state.villager,), 100.0, 100.0)
     assert batch_calls == [([command], 3)]
-    assert game.step_calls == [None]
+    assert game.step_calls == []
     assert np.allclose(observation, [-0.75, -1.0, 0.0, -1.0, 0.375])
     assert reward == 25.0
     assert terminated is True
@@ -187,7 +187,7 @@ def test_stock_delta_reward_no_click_preserves_active_gather_cycle(fake_backend)
     ]
     assert actions.walk_calls == []
     gather_command = ("gather", (game.initial_state.villager,), game.initial_state.resource)
-    assert game.step_calls == [None, [gather_command], None]
+    assert game.step_calls == [[gather_command], None]
 
 
 def test_stock_delta_reward_uses_agent_click_signal(fake_backend):

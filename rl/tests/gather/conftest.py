@@ -45,6 +45,7 @@ class FakeGame:
     def reset(self, scenario_config, *, save_replay=False):
         self.reset_calls.append((scenario_config, save_replay))
         self.current_state = self.initial_state
+        return self.current_state
 
     def step(self, commands=None):
         self.step_calls.append(commands)
