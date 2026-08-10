@@ -10,11 +10,10 @@ override export EPISODES := $(value EPISODES)
 override export ARGS := $(value ARGS)
 override export MODEL := $(value MODEL)
 override export TRUST_MODEL := $(value TRUST_MODEL)
-override export NO_AGENT_VIEW := $(value NO_AGENT_VIEW)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test lint verify engine-observer server oracle random train eval m1-oracle m1-random m1-train m1-eval
+.PHONY: help setup test lint verify engine-observer server server-view oracle random train eval m1-oracle m1-random m1-train m1-eval
 
 help:
 	@printf '%s\n' \
@@ -24,10 +23,11 @@ help:
 		'  make lint                          Run Ruff checks' \
 		'  make verify                        Run all offline quality gates' \
 		'  make engine-observer                Build patched 0 A.D. rendered-view engine' \
-		'  make server                        Start 0 A.D. with the RL interface' \
+		'  make server                        Start headless 0 A.D. for training' \
+		'  make server-view                   Start visual 0 A.D. for debugging' \
 		'  make oracle [EPISODES=…] [ARGS=…]  Evaluate the oracle baseline' \
 		'  make random [EPISODES=…] [ARGS=…]  Evaluate the random baseline' \
-		'  make train [STEPS=…] [MODEL=… TRUST_MODEL=1] [ARGS=…] [NO_AGENT_VIEW=1]  Train/resume SAC' \
+		'  make train [STEPS=…] [MODEL=… TRUST_MODEL=1] [ARGS=…]  Train/resume SAC' \
 		'  make eval MODEL=… TRUST_MODEL=1    Evaluate a trusted SAC checkpoint' \
 		'  make m1-oracle [EPISODES=…]        Evaluate M1 stock-reward oracle' \
 		'  make m1-train [STEPS=…] [MODEL=… TRUST_MODEL=1] [ARGS="--log-interval 1"]  Train/resume SAC on M1 stock reward' \
@@ -55,6 +55,9 @@ engine-observer:
 	./engine/build_observer.sh
 
 server:
+	./run_game.sh --require-rl-observer -autostart-nonvisual --rl-interface=127.0.0.1:6000
+
+server-view:
 	./run_game.sh --require-rl-observer --rl-interface=127.0.0.1:6000
 
 oracle:
@@ -83,37 +86,23 @@ random:
 
 train:
 	@steps="$${STEPS:-}"; \
-	no_agent_view="$${NO_AGENT_VIEW:-}"; \
 	model="$${MODEL:-}"; \
 	trust_model="$${TRUST_MODEL:-}"; \
 	if [[ -n "$$steps" && ! "$$steps" =~ ^[1-9][0-9]*$$ ]]; then \
 		printf '%s\n' 'STEPS must be a positive integer.' >&2; exit 2; \
-	fi; \
-	if [[ -n "$$no_agent_view" && "$$no_agent_view" != "1" ]]; then \
-		printf '%s\n' 'NO_AGENT_VIEW must be 1 when set.' >&2; exit 2; \
 	fi; \
 	if [[ -n "$$model" && "$$trust_model" != "1" ]]; then \
 		printf '%s\n' 'Refusing to deserialize the checkpoint without explicit TRUST_MODEL=1.' >&2; \
 		exit 2; \
 	fi; \
 	read -r -a extra_args <<< "$${ARGS:-}"; \
-	if [[ "$$no_agent_view" == "1" ]]; then \
-		for arg in "$${extra_args[@]}"; do \
-			if [[ "$$arg" == "--agent-view" || "$$arg" == "--delay" || "$$arg" == --delay=* ]]; then \
-				printf '%s\n' 'ARGS cannot include --agent-view or --delay when NO_AGENT_VIEW=1.' >&2; \
-				exit 2; \
-			fi; \
-		done; \
-	fi; \
-	view_args=(--agent-view); \
-	if [[ "$$no_agent_view" == "1" ]]; then view_args=(); fi; \
 	step_args=(); \
 	if [[ -n "$$steps" ]]; then step_args=(--timesteps "$$steps"); fi; \
 	resume_args=(); \
 	if [[ -n "$$model" ]]; then resume_args=(--resume-from "$$model" --trust-model); fi; \
 	$(UV_REQUIRED); \
 	"$(UV)" run --locked python -m rl.train --experiment rl/configs/m0_sb3_sac.toml \
-		"$${view_args[@]}" "$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
+		"$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
 
 eval:
 	@model="$${MODEL:-}"; \
@@ -163,37 +152,23 @@ m1-random:
 
 m1-train:
 	@steps="$${STEPS:-}"; \
-	no_agent_view="$${NO_AGENT_VIEW:-}"; \
 	model="$${MODEL:-}"; \
 	trust_model="$${TRUST_MODEL:-}"; \
 	if [[ -n "$$steps" && ! "$$steps" =~ ^[1-9][0-9]*$$ ]]; then \
 		printf '%s\n' 'STEPS must be a positive integer.' >&2; exit 2; \
-	fi; \
-	if [[ -n "$$no_agent_view" && "$$no_agent_view" != "1" ]]; then \
-		printf '%s\n' 'NO_AGENT_VIEW must be 1 when set.' >&2; exit 2; \
 	fi; \
 	if [[ -n "$$model" && "$$trust_model" != "1" ]]; then \
 		printf '%s\n' 'Refusing to deserialize the checkpoint without explicit TRUST_MODEL=1.' >&2; \
 		exit 2; \
 	fi; \
 	read -r -a extra_args <<< "$${ARGS:-}"; \
-	if [[ "$$no_agent_view" == "1" ]]; then \
-		for arg in "$${extra_args[@]}"; do \
-			if [[ "$$arg" == "--agent-view" || "$$arg" == "--delay" || "$$arg" == --delay=* ]]; then \
-				printf '%s\n' 'ARGS cannot include --agent-view or --delay when NO_AGENT_VIEW=1.' >&2; \
-				exit 2; \
-			fi; \
-		done; \
-	fi; \
-	view_args=(--agent-view); \
-	if [[ "$$no_agent_view" == "1" ]]; then view_args=(); fi; \
 	step_args=(); \
 	if [[ -n "$$steps" ]]; then step_args=(--timesteps "$$steps"); fi; \
 	resume_args=(); \
 	if [[ -n "$$model" ]]; then resume_args=(--resume-from "$$model" --trust-model); fi; \
 	$(UV_REQUIRED); \
 	"$(UV)" run --locked python -m rl.train --experiment rl/configs/m1_sb3_sac.toml \
-		"$${view_args[@]}" "$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
+		"$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
 
 m1-eval:
 	@model="$${MODEL:-}"; \

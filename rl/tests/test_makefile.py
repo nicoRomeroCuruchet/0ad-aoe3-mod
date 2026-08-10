@@ -53,8 +53,13 @@ def test_make_targets_are_thin_wrappers_around_the_canonical_tools():
     assert "run --locked pytest --cov" in _make_dry_run("test")
     assert "run --locked ruff check rl" in _make_dry_run("lint")
     assert (
-        "./run_game.sh --require-rl-observer --rl-interface=127.0.0.1:6000"
+        "./run_game.sh --require-rl-observer -autostart-nonvisual "
+        "--rl-interface=127.0.0.1:6000"
         in _make_dry_run("server")
+    )
+    assert (
+        "./run_game.sh --require-rl-observer --rl-interface=127.0.0.1:6000"
+        in _make_dry_run("server-view")
     )
     assert "./engine/build_observer.sh" in _make_dry_run("engine-observer")
 
@@ -68,8 +73,7 @@ def test_make_agent_targets_forward_parameters(tmp_path):
     )
 
     assert oracle[-5:] == ["--episodes", "3", "--delay", "0.5", "--verbose"]
-    assert training[-5:] == [
-        "--agent-view",
+    assert training[-4:] == [
         "--timesteps",
         "321",
         "--out",
@@ -86,8 +90,7 @@ def test_make_agent_targets_forward_parameters(tmp_path):
     assert "rl/configs/m1_oracle.toml" in m1_oracle
     assert m1_oracle[-3:] == ["--episodes", "1", "--verbose"]
     assert "rl/configs/m1_sb3_sac.toml" in m1_training
-    assert m1_training[-5:] == [
-        "--agent-view",
+    assert m1_training[-4:] == [
         "--timesteps",
         "123",
         "--out",
@@ -100,14 +103,14 @@ def test_make_agent_targets_preserve_config_defaults(tmp_path):
     assert "--timesteps" not in _run_with_fake_uv(tmp_path, "train")
 
 
-def test_make_train_can_disable_the_default_agent_view(tmp_path):
-    training = _run_with_fake_uv(tmp_path, "train", "NO_AGENT_VIEW=1")
-    m1_training = _run_with_fake_uv(tmp_path, "m1-train", "NO_AGENT_VIEW=1")
+def test_make_train_can_opt_into_agent_view(tmp_path):
+    training = _run_with_fake_uv(tmp_path, "train", "ARGS=--agent-view --delay 0.5")
+    m1_training = _run_with_fake_uv(
+        tmp_path, "m1-train", "ARGS=--agent-view --delay 0.5"
+    )
 
-    assert "--agent-view" not in training
-    assert "--delay" not in training
-    assert "--agent-view" not in m1_training
-    assert "--delay" not in m1_training
+    assert training[-3:] == ["--agent-view", "--delay", "0.5"]
+    assert m1_training[-3:] == ["--agent-view", "--delay", "0.5"]
 
 
 def test_make_train_can_resume_from_a_trusted_checkpoint(tmp_path):
@@ -117,7 +120,6 @@ def test_make_train_can_resume_from_a_trusted_checkpoint(tmp_path):
         "MODEL=rl/runs/my m1 run/best_model",
         "TRUST_MODEL=1",
         "STEPS=456",
-        "NO_AGENT_VIEW=1",
     )
 
     assert "rl/configs/m1_sb3_sac.toml" in training
@@ -150,29 +152,6 @@ def test_make_train_requires_trust_when_resuming(tmp_path):
 
     assert result.returncode != 0
     assert "TRUST_MODEL=1" in result.stderr
-    assert not capture_path.exists()
-
-
-def test_make_train_rejects_view_arguments_in_headless_mode(tmp_path):
-    environment, capture_path = _fake_uv_environment(tmp_path)
-
-    result = subprocess.run(
-        [
-            "make",
-            "--no-print-directory",
-            "train",
-            "NO_AGENT_VIEW=1",
-            "ARGS=--agent-view --delay 0.5",
-        ],
-        cwd=REPO_ROOT,
-        env=environment,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-
-    assert result.returncode != 0
-    assert "cannot include --agent-view or --delay" in result.stderr
     assert not capture_path.exists()
 
 

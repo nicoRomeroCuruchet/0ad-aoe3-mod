@@ -32,12 +32,16 @@ fi
 ln -sfnT "$REPO_ROOT" "$MOD_LINK"
 
 require_observer=0
+nonvisual=0
 forwarded_args=()
 for arg in "$@"; do
 	if [[ "$arg" == "--require-rl-observer" ]]; then
 		require_observer=1
 	else
 		forwarded_args+=("$arg")
+		if [[ "$arg" == "-autostart-nonvisual" || "$arg" == "--autostart-nonvisual" ]]; then
+			nonvisual=1
+		fi
 	fi
 done
 
@@ -51,29 +55,33 @@ if [[ ! -x "$OAD_OBSERVER_BINARY" ]]; then
 fi
 
 observer_prefix=()
-if [[ "$SDL_VIDEODRIVER" == "x11" && -z "${DISPLAY:-}" ]]; then
-	if [[ "${OAD_OBSERVER_XVFB:-auto}" == "0" ]]; then
-		printf '%s\n' \
-			'No X11 display is available for the observer engine.' \
-			'Run from a graphical session, install `xvfb` for headless use, or set OAD_SDL_VIDEODRIVER=wayland when native Wayland is available.' >&2
-		exit 1
-	fi
-	if ! command -v xvfb-run >/dev/null 2>&1; then
-		printf '%s\n' \
-			'No X11 display is available for the observer engine, and `xvfb-run` was not found.' \
-			'Install it with: sudo apt install xvfb' \
-			'Then rerun: make server' >&2
-		exit 1
-	fi
-	observer_prefix=(xvfb-run -a -s "${OAD_XVFB_SERVER_ARGS:--screen 0 1024x768x24}")
-fi
 observer_window_args=()
-if [[ "${OAD_OBSERVER_WINDOW_ARGS:-auto}" != "0" ]]; then
-	if [[ "${OAD_OBSERVER_WINDOW_ARGS:-auto}" == "auto" ]]; then
-		observer_window_args=(-xres=1024 -yres=768 -conf=windowed:true)
-	else
-		read -r -a observer_window_args <<< "$OAD_OBSERVER_WINDOW_ARGS"
+renderer_args=()
+if [[ "$nonvisual" -eq 0 ]]; then
+	if [[ "$SDL_VIDEODRIVER" == "x11" && -z "${DISPLAY:-}" ]]; then
+		if [[ "${OAD_OBSERVER_XVFB:-auto}" == "0" ]]; then
+			printf '%s\n' \
+				'No X11 display is available for the observer engine.' \
+				'Run from a graphical session, install `xvfb` for headless use, or set OAD_SDL_VIDEODRIVER=wayland when native Wayland is available.' >&2
+			exit 1
+		fi
+		if ! command -v xvfb-run >/dev/null 2>&1; then
+			printf '%s\n' \
+				'No X11 display is available for the observer engine, and `xvfb-run` was not found.' \
+				'Install it with: sudo apt install xvfb' \
+				'Then rerun: make server-view' >&2
+			exit 1
+		fi
+		observer_prefix=(xvfb-run -a -s "${OAD_XVFB_SERVER_ARGS:--screen 0 1024x768x24}")
 	fi
+	if [[ "${OAD_OBSERVER_WINDOW_ARGS:-auto}" != "0" ]]; then
+		if [[ "${OAD_OBSERVER_WINDOW_ARGS:-auto}" == "auto" ]]; then
+			observer_window_args=(-xres=1024 -yres=768 -conf=windowed:true)
+		else
+			read -r -a observer_window_args <<< "$OAD_OBSERVER_WINDOW_ARGS"
+		fi
+	fi
+	renderer_args=(-conf=rendererbackend:gl)
 fi
 
 binary_root="$(cd "$(dirname "$OAD_OBSERVER_BINARY")/.." && pwd)"
@@ -137,7 +145,7 @@ done
 export LD_LIBRARY_PATH="$binary_root/system${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 set +e
 "${observer_prefix[@]}" "$OAD_OBSERVER_BINARY" -mod=mod -mod=public -mod=aoe3 \
-	"${forwarded_args[@]}" "${observer_window_args[@]}" -conf=rendererbackend:gl
+	"${forwarded_args[@]}" "${observer_window_args[@]}" "${renderer_args[@]}"
 status=$?
 set -e
 exit "$status"

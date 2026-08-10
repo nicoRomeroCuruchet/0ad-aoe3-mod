@@ -51,10 +51,12 @@ los comandos disponibles.
 
 ```bash
 make engine-observer  # sólo la primera vez; compila 0 A.D. Release 28
-make server
+make server           # headless, recomendado para entrenar
+# o, para usar --agent-view:
+make server-view
 ```
-Esperá hasta que imprima **`RL interface listening on 127.0.0.1:6000`** (se abre la ventana
-del juego). Dejá esta terminal abierta. `Ctrl+C` para detener el server.
+Esperá hasta que imprima **`RL interface listening on 127.0.0.1:6000`**. `make server` no abre
+una ventana; `make server-view` sí. Dejá esta terminal abierta. `Ctrl+C` detiene el server.
 
 ### Paso 2 — Correr la política / evaluar (Terminal 2)
 
@@ -105,7 +107,7 @@ sudo apt install build-essential cmake curl libboost-dev libboost-filesystem-dev
 ```
 
 Este build de visualización omite audio, lobby y Atlas. El observer usa el backend OpenGL de Release 28;
-si no hay un display X11, `make server` intenta usar `xvfb-run` automaticamente. Mantené visible
+si no hay un display X11, `make server-view` intenta usar `xvfb-run` automáticamente. Mantené visible
 la ventana del juego y con un tamaño de por lo menos 512×512 mientras uses `--agent-view`; esa
 ventana de debug necesita una sesion grafica real.
 
@@ -140,7 +142,7 @@ confirmá que confiás en ese archivo:
 
 ```bash
 make m1-train MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/best_model \
-  TRUST_MODEL=1 STEPS=100000 NO_AGENT_VIEW=1
+  TRUST_MODEL=1 STEPS=100000
 ```
 
 Cada corrida crea una carpeta ignorada por git en `rl/runs/` con el modelo, la config resuelta,
@@ -162,11 +164,10 @@ tail -f rl/runs/ULTIMA_CORRIDA/training/progress.csv
 `training.log_interval = 1` en los TOML hace que SB3 vuelque métricas cada episodio terminado;
 podés cambiarlo por corrida con `make m1-train ARGS="--log-interval 2"`.
 
-`make train` y `make m1-train` abren por defecto la vista local **antes de empezar SAC** y la actualizan con cada
-decisión del entrenamiento; la misma ventana sigue activa durante la evaluación final. Para
-sostener cada decisión medio segundo, usá
-`make train ARGS="--delay 0.5"`. En una terminal sin escritorio o para una corrida desatendida,
-desactivala con `make train NO_AGENT_VIEW=1` o `make m1-train NO_AGENT_VIEW=1`.
+`make train` y `make m1-train` no capturan imágenes durante SAC. Para depurar visualmente una
+corrida, arrancá el engine con `make server-view` y agregá la vista de forma explícita, por
+ejemplo `make train ARGS="--agent-view --delay 0.5"`. La vista se actualiza con cada decisión y
+sigue activa durante la evaluación final.
 
 ### Correr los tests (no necesitan el juego)
 
@@ -294,7 +295,7 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 
 | Ya hecho (no lo toquen, reúsenlo) | Dónde |
 |---|---|
-| Lanzar 0 A.D. con la interfaz RL | `make engine-observer` una vez; después `make server` |
+| Lanzar 0 A.D. con la interfaz RL | `make engine-observer` una vez; después `make server` (headless) o `make server-view` (debug) |
 | Entorno Gym (`reset`/`step`/obs/acción) | `gather/env.py` (lo **extienden**, no lo reescriben) |
 | Orquestación de entrenamiento + evaluación | `experiments/training.py`, `experiments/evaluation.py` |
 | Conexión al motor y acciones (`walk`/`gather`/…) | cliente `zero_ad` |

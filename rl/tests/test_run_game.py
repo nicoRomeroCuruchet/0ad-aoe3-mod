@@ -225,6 +225,64 @@ def test_launcher_mounts_appimage_data_for_the_patched_binary(tmp_path):
     ).resolve() == appdir / "usr/data/mods/public"
 
 
+def test_nonvisual_observer_does_not_require_a_display(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    appdir = tmp_path / "appdir"
+    for relative in ("usr/data/config", "usr/data/mods/mod", "usr/data/mods/public"):
+        (appdir / relative).mkdir(parents=True)
+
+    fake_appimage = tmp_path / "0ad.AppImage"
+    fake_appimage.write_text(
+        "#!/usr/bin/env bash\n"
+        'if [[ "${1:-}" == "--appimage-mount" ]]; then\n'
+        '  printf "%s\\n" "$FAKE_APPDIR"\n'
+        "  sleep 30\n"
+        "fi\n",
+        encoding="utf-8",
+    )
+    fake_appimage.chmod(0o755)
+
+    engine_binary = tmp_path / "engine/binaries/system/pyrogenesis"
+    engine_binary.parent.mkdir(parents=True)
+    captured_arguments = tmp_path / "engine-arguments.txt"
+    engine_binary.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$CAPTURED_ARGUMENTS"\n',
+        encoding="utf-8",
+    )
+    engine_binary.chmod(0o755)
+
+    environment = {
+        **os.environ,
+        "HOME": str(home),
+        "OAD_APPIMAGE": str(fake_appimage),
+        "OAD_OBSERVER_BINARY": str(engine_binary),
+        "OAD_OBSERVER_XVFB": "0",
+        "FAKE_APPDIR": str(appdir),
+        "CAPTURED_ARGUMENTS": str(captured_arguments),
+    }
+    environment.pop("DISPLAY", None)
+
+    subprocess.run(
+        [
+            RUN_GAME,
+            "--require-rl-observer",
+            "-autostart-nonvisual",
+            "--rl-interface=127.0.0.1:6000",
+        ],
+        check=True,
+        env=environment,
+    )
+
+    assert captured_arguments.read_text(encoding="utf-8").splitlines() == [
+        "-mod=mod",
+        "-mod=public",
+        "-mod=aoe3",
+        "-autostart-nonvisual",
+        "--rl-interface=127.0.0.1:6000",
+    ]
+
+
 def test_launcher_wraps_observer_in_xvfb_when_x11_display_is_missing(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
