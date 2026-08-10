@@ -153,6 +153,9 @@ class SB3SACTrainer:
             model = sac_class(policy_name, request.env, **parameters)
             learn_kwargs = {}
         else:
+            # SB3 restores the serialized policy architecture itself and checks
+            # policy_kwargs for exact equality, including its injected defaults.
+            parameters.pop("policy_kwargs", None)
             model = sac_class.load(
                 str(request.resume_from),
                 env=request.env,

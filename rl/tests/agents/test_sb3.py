@@ -127,6 +127,7 @@ def test_sb3_sac_trainer_owns_the_library_specific_training_loop(monkeypatch):
                 "policy": "MultiInputPolicy",
                 "learning_starts": 200,
                 "buffer_size": 50_000,
+                "policy_kwargs": {"net_arch": (64, 64)},
             },
         ),
         total_steps=1_234,
@@ -144,6 +145,7 @@ def test_sb3_sac_trainer_owns_the_library_specific_training_loop(monkeypatch):
     assert model.kwargs == {
         "buffer_size": 50_000,
         "learning_starts": 200,
+        "policy_kwargs": {"net_arch": [64, 64]},
         "seed": 7,
     }
     assert model.learn_calls == [(1_234, 3, None, True)]
@@ -171,7 +173,11 @@ def test_sb3_sac_trainer_can_continue_from_a_checkpoint(monkeypatch, tmp_path: P
         env=env,
         agent=AgentSpec(
             name="sb3_sac",
-            parameters={"policy": "MlpPolicy", "learning_starts": 200},
+            parameters={
+                "policy": "MlpPolicy",
+                "learning_starts": 200,
+                "policy_kwargs": {"net_arch": (64, 64)},
+            },
         ),
         total_steps=500,
         seed=11,
