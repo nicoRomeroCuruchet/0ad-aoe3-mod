@@ -31,9 +31,13 @@ class CommandDummyEnv:
 class SavableModel:
     def __init__(self):
         self.saved_to = None
+        self.replay_buffer_saved_to = None
 
     def save(self, path):
         self.saved_to = path
+
+    def save_replay_buffer(self, path):
+        self.replay_buffer_saved_to = path
 
 
 def test_registry_lists_explicit_supported_agent_names():
@@ -105,6 +109,9 @@ def test_registry_saves_sb3_policy_through_its_registered_serializer(tmp_path: P
     save_policy(AgentSpec("sb3_sac"), policy, tmp_path / "model")
 
     assert model.saved_to == str(tmp_path / "model")
+    assert model.replay_buffer_saved_to == str(
+        tmp_path / "model.replay_buffer.pkl"
+    )
 
 
 def test_registry_refuses_to_save_a_policy_with_the_wrong_adapter(tmp_path: Path):

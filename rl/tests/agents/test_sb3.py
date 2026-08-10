@@ -16,6 +16,7 @@ class FakeModel:
     def __init__(self):
         self.predict_calls = []
         self.saved_to = None
+        self.replay_buffer_saved_to = None
 
     def predict(self, observation, *, deterministic):
         self.predict_calls.append((observation, deterministic))
@@ -23,6 +24,9 @@ class FakeModel:
 
     def save(self, path):
         self.saved_to = path
+
+    def save_replay_buffer(self, path):
+        self.replay_buffer_saved_to = path
 
 
 class FakeSAC:
@@ -38,7 +42,11 @@ class FakeSAC:
         self.predict_calls = []
         self.logger = None
         self.saved_paths = []
+        self.replay_buffer_saved_paths = []
+        self.replay_buffer_loaded_from = []
         self.random_seed = None
+        self.num_timesteps = 250
+        self.learning_starts = kwargs.get("learning_starts", 100)
         FakeSAC.constructed.append(self)
 
     def set_random_seed(self, seed):
@@ -68,11 +76,19 @@ class FakeSAC:
         self.saved_to = path
         self.saved_paths.append(path)
 
+    def save_replay_buffer(self, path):
+        self.replay_buffer_saved_paths.append(path)
+
+    def load_replay_buffer(self, path):
+        self.replay_buffer_loaded_from.append(path)
+
     @classmethod
     def load(cls, path, **kwargs):
         cls.loaded_from.append(path)
         cls.loaded_kwargs.append(kwargs)
-        return cls("loaded", None)
+        parameters = dict(kwargs)
+        env = parameters.pop("env", None)
+        return cls("loaded", env, **parameters)
 
 
 def test_sb3_policy_adapts_predict_to_the_common_policy_contract(tmp_path: Path):
@@ -87,6 +103,9 @@ def test_sb3_policy_adapts_predict_to_the_common_policy_contract(tmp_path: Path)
     np.testing.assert_array_equal(action, np.array([0.25, -0.5], dtype=np.float32))
     assert model.predict_calls == [(observation, True)]
     assert model.saved_to == str(tmp_path / "model")
+    assert model.replay_buffer_saved_to == str(
+        tmp_path / "model.replay_buffer.pkl"
+    )
 
 
 def test_sb3_sac_trainer_owns_the_library_specific_training_loop(monkeypatch):
@@ -146,9 +165,14 @@ def test_sb3_sac_trainer_can_continue_from_a_checkpoint(monkeypatch, tmp_path: P
     monkeypatch.setattr("rl.agents.sb3._load_logger_configure", lambda: fake_configure)
     env = object()
     checkpoint = tmp_path / "best_model"
+    replay_buffer = tmp_path / "best_model.replay_buffer.pkl"
+    replay_buffer.write_bytes(b"trusted replay")
     request = TrainRequest(
         env=env,
-        agent=AgentSpec(name="sb3_sac", parameters={"policy": "MlpPolicy"}),
+        agent=AgentSpec(
+            name="sb3_sac",
+            parameters={"policy": "MlpPolicy", "learning_starts": 200},
+        ),
         total_steps=500,
         seed=11,
         log_dir=tmp_path / "training",
@@ -161,12 +185,39 @@ def test_sb3_sac_trainer_can_continue_from_a_checkpoint(monkeypatch, tmp_path: P
     model = policy.model
     assert isinstance(policy, SB3Policy)
     assert FakeSAC.loaded_from[-1] == str(checkpoint)
-    assert FakeSAC.loaded_kwargs[-1] == {"env": env}
+    assert FakeSAC.loaded_kwargs[-1] == {
+        "env": env,
+        "learning_starts": 200,
+        "seed": 11,
+    }
+    assert model.replay_buffer_loaded_from == [str(replay_buffer)]
     assert model.random_seed == 11
     assert model.learn_calls == [(500, 2, None, False)]
     assert configured_loggers == [
         (str(tmp_path / "training"), ["stdout", "csv", "json"])
     ]
+
+
+def test_sb3_sac_trainer_rewarms_a_legacy_model_only_checkpoint(
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr("rl.agents.sb3._load_sac_class", lambda: FakeSAC)
+    request = TrainRequest(
+        env=object(),
+        agent=AgentSpec(
+            name="sb3_sac",
+            parameters={"policy": "MlpPolicy", "learning_starts": 200},
+        ),
+        total_steps=500,
+        seed=11,
+        resume_from=tmp_path / "legacy_model",
+    )
+
+    policy = SB3SACTrainer().fit(request)
+
+    assert policy.model.replay_buffer_loaded_from == []
+    assert policy.model.learning_starts == policy.model.num_timesteps + 200
 
 
 def test_sb3_sac_trainer_saves_the_best_episode_reward(monkeypatch, tmp_path: Path):
@@ -208,6 +259,10 @@ def test_sb3_sac_trainer_saves_the_best_episode_reward(monkeypatch, tmp_path: Pa
     assert model.saved_paths == [
         str(tmp_path / "best_model"),
         str(tmp_path / "best_model"),
+    ]
+    assert model.replay_buffer_saved_paths == [
+        str(tmp_path / "best_model.replay_buffer.pkl"),
+        str(tmp_path / "best_model.replay_buffer.pkl"),
     ]
     assert callback.best_reward == 2.5
 

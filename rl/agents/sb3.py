@@ -70,6 +70,18 @@ def _episode_rewards(infos: object) -> tuple[float, ...]:
     return tuple(rewards)
 
 
+def _replay_buffer_path(path: str | Path) -> Path:
+    checkpoint = Path(path)
+    if checkpoint.suffix == ".zip":
+        checkpoint = checkpoint.with_suffix("")
+    return checkpoint.with_name(f"{checkpoint.name}.replay_buffer.pkl")
+
+
+def _save_checkpoint(model: Any, path: str | Path) -> None:
+    model.save(str(path))
+    model.save_replay_buffer(str(_replay_buffer_path(path)))
+
+
 def _build_best_reward_callback(path: Path) -> Any:
     base_callback = _load_base_callback_class()
 
@@ -84,7 +96,7 @@ def _build_best_reward_callback(path: Path) -> Any:
                 if reward > self.best_reward:
                     self.best_reward = reward
                     self.destination.parent.mkdir(parents=True, exist_ok=True)
-                    self.model.save(str(self.destination))
+                    _save_checkpoint(self.model, self.destination)
                     print(
                         f"best_model: {self.destination} "
                         f"episode_reward={reward:.6g}",
@@ -114,7 +126,7 @@ class SB3Policy:
         return np.asarray(action, dtype=np.float32)
 
     def save(self, path: str | Path) -> None:
-        self.model.save(str(path))
+        _save_checkpoint(self.model, path)
 
 
 class SB3SACTrainer:
@@ -129,7 +141,22 @@ class SB3SACTrainer:
             model = sac_class(policy_name, request.env, **parameters)
             learn_kwargs = {}
         else:
-            model = sac_class.load(str(request.resume_from), env=request.env)
+            model = sac_class.load(
+                str(request.resume_from),
+                env=request.env,
+                **parameters,
+            )
+            replay_buffer = _replay_buffer_path(request.resume_from)
+            if replay_buffer.is_file():
+                model.load_replay_buffer(str(replay_buffer))
+            else:
+                warmup_steps = int(getattr(model, "learning_starts", 0))
+                model.learning_starts = int(model.num_timesteps) + warmup_steps
+                print(
+                    f"replay_buffer: {replay_buffer} not found; "
+                    f"collecting {warmup_steps} fresh transitions before updates",
+                    flush=True,
+                )
             set_random_seed = getattr(model, "set_random_seed", None)
             if callable(set_random_seed):
                 set_random_seed(request.seed)

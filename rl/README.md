@@ -150,6 +150,10 @@ las métricas por episodio y metadata. El comando imprime la ruta exacta al term
 El modelo se guarda **antes** de la evaluación final: si el server se corta durante esa etapa,
 el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente salvo que agregues
 `--force`.
+Cada checkpoint SAC incluye un archivo hermano `*.replay_buffer.pkl`; conservá ambos para
+reanudar sin descartar la experiencia acumulada. `TRUST_MODEL=1` cubre los dos archivos
+serializados. Los checkpoints antiguos que sólo tienen el modelo siguen funcionando, pero SAC
+vuelve a llenar un buffer inicial antes de actualizar la red.
 Mientras entrena SAC, también guarda `best_model` cada vez que un episodio terminado supera el
 mejor reward anterior; usá ese checkpoint para inspeccionar la mejor política encontrada hasta
 ese momento aunque el run siga abierto.
