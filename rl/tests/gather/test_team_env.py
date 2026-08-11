@@ -452,3 +452,14 @@ def test_participation_requirement_is_off_by_default():
     )
 
     assert terminated is True
+
+
+def test_last_remaining_is_exposed_for_the_live_view():
+    env, _game, _actions = _env()
+    env.reset()
+
+    assert env._last_remaining == (200.0, 200.0)
+
+    env.step(np.zeros(6, dtype=np.float32))
+
+    assert env._last_remaining == (200.0, 200.0)

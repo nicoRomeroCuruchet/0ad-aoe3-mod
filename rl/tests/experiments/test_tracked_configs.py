@@ -171,7 +171,7 @@ def test_m2_configs_share_the_team_scenario_and_threshold():
         )
     training = configs["m2_sb3_ppo.toml"].training
     assert training.solved_success_rate == 0.8
-    assert training.solved_check_interval_steps == 5_000
+    assert training.solved_check_interval_steps == 3_000
 
 
 def test_m2_pays_for_finishing_fast_with_a_shared_villager_policy():

@@ -137,6 +137,7 @@ class ZeroADTeamGatherEnv(gym.Env):
         self._target_index: tuple[int, ...] = ()
         self._cycle_active: tuple[bool, ...] = ()
         self._delivered: tuple[float, ...] = ()
+        self._last_remaining: tuple[float, ...] = ()
         self._closed = False
 
     # ------------------------------------------------------------------ engine
@@ -229,6 +230,7 @@ class ZeroADTeamGatherEnv(gym.Env):
         stock, carried, remaining = self._read_engine(roster)
         self._initial_stock = stock
         self._previous_stock = stock
+        self._last_remaining = remaining
         self._previous_carried = carried
         self._previous_distance = tuple(
             distance(villager_xz[index], resource_xz[self._target_index[index]])
@@ -402,6 +404,7 @@ class ZeroADTeamGatherEnv(gym.Env):
             self._cycle_active = tuple(False for _ in self._cycle_active)
         self._previous_stock = stock
         self._previous_carried = carried
+        self._last_remaining = remaining
         self._previous_distance = tuple(current_distance)
         self._step_count += 1
 

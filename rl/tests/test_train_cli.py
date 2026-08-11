@@ -623,7 +623,7 @@ def test_main_refuses_to_overwrite_an_existing_checkpoint_without_force(
     assert "--force" in capsys.readouterr().err
 
 
-def test_live_view_is_forwarded_only_when_the_flag_is_set(monkeypatch, tmp_path):
+def test_check_delay_is_forwarded_only_when_requested(monkeypatch, tmp_path):
     experiment_path = write_experiment(tmp_path)
     seen = []
 
@@ -654,9 +654,10 @@ def test_live_view_is_forwarded_only_when_the_flag_is_set(monkeypatch, tmp_path)
             str(experiment_path),
             "--run-root",
             str(tmp_path / "runs"),
-            "--live-view",
+            "--check-delay",
+            "0.25",
         ]
     )
 
-    assert "live_view" not in seen[0]
-    assert seen[1]["live_view"] is not None
+    assert "check_delay" not in seen[0]
+    assert seen[1]["check_delay"] == 0.25

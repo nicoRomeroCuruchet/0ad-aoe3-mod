@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from pathlib import Path
 from typing import Any, Callable
 
@@ -10,9 +12,6 @@ import numpy as np
 
 from rl.agents.base import AgentSpec, Policy, TrainRequest, Trainer
 from rl.agents.registry import build_trainer
-
-from rl.gather.live_view import LiveEpisodeView
-from rl.gather.team_render import TeamRenderState
 
 from .config import ExperimentConfig
 from .evaluation import DecisionObserver, DecisionRecord, evaluate
@@ -65,7 +64,7 @@ def train_policy(
     best_model_path: Path | None = None,
     checkpoint_path: Path | None = None,
     resume_from: Path | None = None,
-    live_view: LiveEpisodeView | None = None,
+    check_delay: float = 0.0,
 ) -> Policy:
     """Train the configured agent against an already-created environment."""
 
@@ -77,16 +76,14 @@ def train_policy(
     if config.training.solved_window_episodes is not None:
 
         def solve_evaluator(policy: Policy) -> float:
-            # The live view watches only the first episode of the check, which
-            # is enough to see what the policy is doing without slowing the
-            # rest of the window down.
+            # Pace only the first episode of the check so it can be watched
+            # in the game window; the rest run at full speed for the criterion.
             watcher = None
-            if live_view is not None:
+            if check_delay > 0.0:
 
                 def watcher(record: DecisionRecord) -> None:
-                    state = _render_state(env)
-                    if state is not None:
-                        live_view.observe(state)
+                    if record.episode == 0:
+                        time.sleep(check_delay)
 
             report = evaluate(
                 env,
@@ -96,16 +93,6 @@ def train_policy(
                 seed=config.evaluation.seed,
                 decision_observer=_combine(decision_observer, watcher),
             )
-            if live_view is not None:
-                page = live_view.publish(
-                    steps=_model_steps(policy),
-                    summary=(
-                        f"success {report.success_rate:.0%} "
-                        f"| mean reward {report.mean_total_reward:.1f} "
-                        f"| mean steps {report.mean_steps:.1f}"
-                    ),
-                )
-                print(f"live_view: {page}", flush=True)
             return report.success_rate
 
     request = TrainRequest(
@@ -141,30 +128,3 @@ def _combine(
         second(record)
 
     return combined
-
-
-def _model_steps(policy: Policy) -> int:
-    model = getattr(policy, "model", None)
-    return int(getattr(model, "num_timesteps", 0))
-
-
-def _render_state(env: Any) -> TeamRenderState | None:
-    """Read the current scene from a team environment, if it is one."""
-
-    roster = getattr(env, "_roster", None)
-    if roster is None or roster.dropsite is None:
-        return None
-    targets = ()
-    target_index = getattr(env, "_target_index", ())
-    if target_index:
-        targets = tuple(
-            tuple(roster.resources[index].position()) for index in target_index
-        )
-    return TeamRenderState(
-        villager_xz=tuple(tuple(unit.position()) for unit in roster.villagers),
-        resource_xz=tuple(tuple(unit.position()) for unit in roster.resources),
-        resource_remaining=(),
-        carried=tuple(getattr(env, "_previous_carried", ())),
-        dropsite_xz=tuple(roster.dropsite.position()),
-        targets_xz=targets,
-    )

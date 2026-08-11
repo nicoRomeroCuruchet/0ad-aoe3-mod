@@ -24,7 +24,6 @@ from rl.experiments.config import (
 from rl.experiments.environments import build_environment
 from rl.experiments.evaluation import evaluate
 from rl.experiments.training import train_policy
-from rl.gather.live_view import LiveEpisodeView
 from rl.gather.agent_view import (
     AgentView,
     AgentViewUnavailable,
@@ -148,9 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds to hold each pre-action frame in --agent-view",
     )
     parser.add_argument(
-        "--live-view",
-        action="store_true",
-        help="write a self-refreshing page showing the newest evaluated episode",
+        "--check-delay",
+        type=_non_negative_float,
+        default=0.0,
+        help=(
+            "seconds to pause between decisions of the first episode of each "
+            "solve check, so it can be watched in the game window"
+        ),
     )
     parser.add_argument(
         "--allow-remote-server",
@@ -249,14 +252,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if agent_view is None
             else make_agent_view_observer(agent_view, delay=args.delay)
         )
-        live_view = (
-            LiveEpisodeView(artifacts.run_dir / "live") if args.live_view else None
-        )
-        if live_view is not None:
-            print(f"live_view: {artifacts.run_dir / 'live' / 'index.html'}", flush=True)
         # Only forwarded when requested, so the default training path keeps the
-        # exact signature it had before the live view existed.
-        live_view_options = {} if live_view is None else {"live_view": live_view}
+        # exact signature it had before pacing existed.
+        pacing_options = {} if not args.check_delay else {"check_delay": args.check_delay}
         policy = train_policy(
             config,
             env,
@@ -265,7 +263,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             best_model_path=best_model_path,
             checkpoint_path=model_path,
             resume_from=args.resume_from,
-            **live_view_options,
+            **pacing_options,
         )
         completed_training_metadata = {
             **metadata,
