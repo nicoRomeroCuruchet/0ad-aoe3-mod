@@ -98,3 +98,97 @@ def test_sb3_resolves_the_policy_name():
 
     assert _resolve_policy("SharedVillagerPolicy") is SharedVillagerActorCriticPolicy
     assert _resolve_policy("MlpPolicy") == "MlpPolicy"
+
+
+class _FakeM1Policy(torch.nn.Module):
+    def __init__(self, obs_dim=10, hidden=64):
+        super().__init__()
+        self.mlp_extractor = torch.nn.Module()
+        self.mlp_extractor.policy_net = torch.nn.Sequential(
+            torch.nn.Linear(obs_dim, hidden),
+            torch.nn.Tanh(),
+            torch.nn.Linear(hidden, hidden),
+            torch.nn.Tanh(),
+        )
+        self.action_net = torch.nn.Linear(hidden, 3)
+        self.log_std = torch.nn.Parameter(torch.full((3,), -0.5))
+
+
+class _FakeM1Model:
+    def __init__(self, policy):
+        self.policy = policy
+
+
+def _loader(policy):
+    return lambda _path: _FakeM1Model(policy)
+
+
+def test_m1_weights_land_in_the_input_prefix_and_new_inputs_start_at_zero():
+    from rl.agents.shared_policy import initialize_from_m1
+
+    policy = _policy()
+    m1 = _FakeM1Policy()
+
+    initialize_from_m1(policy, "unused", loader=_loader(m1))
+
+    first = policy.mlp_extractor.villager_trunk[0]
+    assert torch.allclose(first.weight[:, :10], m1.mlp_extractor.policy_net[0].weight)
+    # Agent id and relational block contribute nothing until training moves them.
+    assert torch.count_nonzero(first.weight[:, 10:]) == 0
+    assert torch.allclose(first.bias, m1.mlp_extractor.policy_net[0].bias)
+
+
+def test_m1_hidden_layer_and_action_head_copy_exactly():
+    from rl.agents.shared_policy import initialize_from_m1
+
+    policy = _policy()
+    m1 = _FakeM1Policy()
+
+    initialize_from_m1(policy, "unused", loader=_loader(m1))
+
+    assert torch.allclose(
+        policy.mlp_extractor.villager_trunk[2].weight,
+        m1.mlp_extractor.policy_net[2].weight,
+    )
+    assert torch.allclose(policy.mlp_extractor.villager_head.weight, m1.action_net.weight)
+    assert torch.allclose(policy.mlp_extractor.villager_head.bias, m1.action_net.bias)
+
+
+def test_log_std_is_repeated_once_per_villager():
+    from rl.agents.shared_policy import initialize_from_m1
+
+    policy = _policy(villager_count=4)
+
+    initialize_from_m1(policy, "unused", loader=_loader(_FakeM1Policy()))
+
+    assert policy.log_std.shape == (12,)
+    assert torch.allclose(policy.log_std, torch.full((12,), -0.5))
+
+
+def test_a_warm_started_policy_reproduces_m1_on_the_prefix():
+    from rl.agents.shared_policy import initialize_from_m1
+
+    policy = _policy()
+    m1 = _FakeM1Policy()
+    initialize_from_m1(policy, "unused", loader=_loader(m1))
+
+    core = torch.randn(1, 10)
+    slice_values = torch.cat([core, torch.randn(1, 21)], dim=1)
+    observation = slice_values.repeat(1, 4).reshape(1, 4, 31)
+
+    with torch.no_grad():
+        actions, _values, _log_prob = policy(observation, deterministic=True)
+        expected = m1.action_net(m1.mlp_extractor.policy_net(core))
+
+    # The appended inputs are ignored at initialization, so M1's behaviour is
+    # reproduced exactly whatever they contain.
+    assert torch.allclose(actions.reshape(4, 3)[0], expected[0], atol=1e-6)
+
+
+def test_transfer_rejects_a_wider_m1_observation():
+    from rl.agents.shared_policy import M1TransferError, initialize_from_m1
+
+    policy = _policy(slice_dim=8)
+
+    with pytest.raises(M1TransferError, match="only 8"):
+        initialize_from_m1(policy, "unused", loader=_loader(_FakeM1Policy(obs_dim=10)))

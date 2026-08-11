@@ -24,6 +24,9 @@ backend_retry_delay = 1.0
 [agent]
 name = "sb3_ppo"
 policy = "SharedVillagerPolicy"
+# Warm start: M1 already learned the one-villager gather skill, and slice
+# indices 0-9 are M1's observation, so its weights load into the prefix.
+policy_kwargs = { m1_checkpoint = "rl/runs/m1_sb3_ppo-20260810T231140947825Z/model" }
 verbose = 1
 n_steps = 512
 batch_size = 64

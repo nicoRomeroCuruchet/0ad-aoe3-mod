@@ -74,8 +74,15 @@ class SharedVillagerExtractor(nn.Module):
 class SharedVillagerActorCriticPolicy(ActorCriticPolicy):
     """ActorCriticPolicy whose actor is one network shared by every villager."""
 
-    def __init__(self, *args: Any, hidden_dim: int = 64, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        hidden_dim: int = 64,
+        m1_checkpoint: str | None = None,
+        **kwargs: Any,
+    ) -> None:
         self.hidden_dim = hidden_dim
+        self.m1_checkpoint = m1_checkpoint
         super().__init__(*args, **kwargs)
 
     def _villager_shape(self) -> tuple[int, int]:
@@ -106,3 +113,63 @@ class SharedVillagerActorCriticPolicy(ActorCriticPolicy):
             lr=lr_schedule(1),
             **self.optimizer_kwargs,
         )
+        if self.m1_checkpoint is not None:
+            initialize_from_m1(self, self.m1_checkpoint)
+            print(f"m1_transfer: warm-started from {self.m1_checkpoint}", flush=True)
+
+
+class M1TransferError(ValueError):
+    """Raised when an M1 checkpoint cannot initialize the shared network."""
+
+
+def initialize_from_m1(
+    policy: SharedVillagerActorCriticPolicy,
+    checkpoint_path: str,
+    *,
+    loader: Any = None,
+) -> None:
+    """Warm-start the shared villager network from a trained M1 policy.
+
+    M1 learned the whole gather skill for one villager: walk to a tree, gather,
+    stay quiet while UnitAI hauls. Its actor has the same shape as one villager's
+    network here, and slice indices 0-9 are M1's observation in M1's order, so
+    its weights copy straight into the input prefix. The weights for the
+    appended inputs -- agent id and the relational block -- start at zero, so at
+    step one the policy behaves exactly like trained M1 and training only has to
+    learn what the new inputs mean.
+
+    Loading a checkpoint deserializes pickled objects; only pass files you trust.
+    """
+
+    if loader is None:  # pragma: no cover - exercised live, stubbed in tests
+        from stable_baselines3 import PPO
+
+        def loader(path: str) -> Any:
+            return PPO.load(path, device="cpu")
+
+    source = loader(checkpoint_path).policy
+    extractor = policy.mlp_extractor
+    source_trunk = source.mlp_extractor.policy_net
+    target_trunk = extractor.villager_trunk
+
+    m1_inputs = source_trunk[0].weight.shape[1]
+    if m1_inputs > extractor.slice_dim:
+        raise M1TransferError(
+            f"M1 observation is {m1_inputs} wide but a villager slice is only "
+            f"{extractor.slice_dim}"
+        )
+    if source_trunk[0].weight.shape[0] != target_trunk[0].weight.shape[0]:
+        raise M1TransferError("M1 hidden width does not match the villager trunk")
+    if source.action_net.weight.shape[0] != ACTION_VALUES_PER_VILLAGER:
+        raise M1TransferError("M1 action head does not emit three values")
+
+    with torch.no_grad():
+        target_trunk[0].weight.zero_()
+        target_trunk[0].weight[:, :m1_inputs] = source_trunk[0].weight
+        target_trunk[0].bias.copy_(source_trunk[0].bias)
+        target_trunk[2].weight.copy_(source_trunk[2].weight)
+        target_trunk[2].bias.copy_(source_trunk[2].bias)
+        extractor.villager_head.weight.copy_(source.action_net.weight)
+        extractor.villager_head.bias.copy_(source.action_net.bias)
+        # One villager's exploration spread, repeated for every villager.
+        policy.log_std.copy_(source.log_std.repeat(extractor.villager_count))
