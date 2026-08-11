@@ -181,7 +181,7 @@ def test_m2_pays_for_finishing_fast_with_a_shared_villager_policy():
     }
 
     for config in configs.values():
-        assert config.environment.parameters["horizon"] == 15
+        assert config.environment.parameters["horizon"] == 20
 
     agent = configs["m2_sb3_ppo.toml"].agent.parameters
     # One network per villager, so an idle villager cannot diverge from a
