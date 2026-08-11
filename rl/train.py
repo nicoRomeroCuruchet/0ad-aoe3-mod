@@ -147,6 +147,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds to hold each pre-action frame in --agent-view",
     )
     parser.add_argument(
+        "--demo-uri",
+        help=(
+            "second 0 A.D. server (a visual one) where one deterministic "
+            "episode is played at each solve check, so it can be watched"
+        ),
+    )
+    parser.add_argument(
         "--check-delay",
         type=_non_negative_float,
         default=0.0,
@@ -235,6 +242,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     env: object | None = None
+    demo_env: object | None = None
     agent_view: AgentView | None = None
     checkpoint_saved = False
     try:
@@ -242,6 +250,17 @@ def main(argv: Sequence[str] | None = None) -> int:
             config.environment,
             allow_remote=args.allow_remote_server,
         )
+        if args.demo_uri is not None:
+            demo_env = build_environment(
+                apply_overrides(
+                    loaded_config,
+                    uri=args.demo_uri,
+                    total_steps=args.timesteps,
+                    log_interval=args.log_interval,
+                ).environment,
+                allow_remote=args.allow_remote_server,
+            )
+            print(f"demo_server: {args.demo_uri}", flush=True)
         if args.agent_view:
             try:
                 agent_view = open_agent_view(env)
@@ -255,6 +274,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Only forwarded when requested, so the default training path keeps the
         # exact signature it had before pacing existed.
         pacing_options = {} if not args.check_delay else {"check_delay": args.check_delay}
+        if demo_env is not None:
+            pacing_options["demo_env"] = demo_env
         policy = train_policy(
             config,
             env,
@@ -321,6 +342,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             if agent_view is not None:
                 agent_view.close()
         finally:
+            if demo_env is not None:
+                _close_environment(demo_env)
             if env is not None:
                 _close_environment(env)
 

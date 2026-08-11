@@ -65,6 +65,7 @@ def train_policy(
     checkpoint_path: Path | None = None,
     resume_from: Path | None = None,
     check_delay: float = 0.0,
+    demo_env: Any = None,
 ) -> Policy:
     """Train the configured agent against an already-created environment."""
 
@@ -76,14 +77,7 @@ def train_policy(
     if config.training.solved_window_episodes is not None:
 
         def solve_evaluator(policy: Policy) -> float:
-            # Pace only the first episode of the check so it can be watched
-            # in the game window; the rest run at full speed for the criterion.
             watcher = None
-            if check_delay > 0.0:
-
-                def watcher(record: DecisionRecord) -> None:
-                    if record.episode == 0:
-                        time.sleep(check_delay)
 
             report = evaluate(
                 env,
@@ -93,6 +87,29 @@ def train_policy(
                 seed=config.evaluation.seed,
                 decision_observer=_combine(decision_observer, watcher),
             )
+            if demo_env is not None:
+                # One paced episode on the visual engine, so the run can be
+                # watched without a renderer attached to headless training.
+                def paced(record: DecisionRecord) -> None:
+                    del record
+                    if check_delay > 0.0:
+                        time.sleep(check_delay)
+
+                demo = evaluate(
+                    demo_env,
+                    policy,
+                    episodes=1,
+                    deterministic=True,
+                    seed=config.evaluation.seed,
+                    decision_observer=paced,
+                )
+                print(
+                    "demo: "
+                    f"reward={demo.mean_total_reward:.1f} "
+                    f"steps={demo.mean_steps:.0f} "
+                    f"success={demo.success_rate:.0%}",
+                    flush=True,
+                )
             return report.success_rate
 
     request = TrainRequest(
