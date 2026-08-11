@@ -174,12 +174,17 @@ def test_m2_configs_share_the_team_scenario_and_threshold():
     assert training.solved_check_interval_steps == 5_000
 
 
-def test_m2_requires_every_villager_to_deliver():
-    paths = sorted(CONFIG_DIRECTORY.glob("m2_*.toml"))
-    configs = {path.name: load_experiment_config(path) for path in paths}
+def test_m2_pays_for_finishing_fast_with_a_shared_villager_policy():
+    configs = {
+        path.name: load_experiment_config(path)
+        for path in sorted(CONFIG_DIRECTORY.glob("m2_*.toml"))
+    }
 
     for config in configs.values():
-        # A total-wood threshold alone is satisfiable by one villager making
-        # several trips, so participation is part of the criterion.
-        assert config.environment.parameters["min_delivery_per_villager"] == 20.0
         assert config.environment.parameters["horizon"] == 40
+
+    agent = configs["m2_sb3_ppo.toml"].agent.parameters
+    # One network per villager, so an idle villager cannot diverge from a
+    # working one, and a discount that makes finishing sooner worth more.
+    assert agent["policy"] == "SharedVillagerPolicy"
+    assert agent["gamma"] == 0.9

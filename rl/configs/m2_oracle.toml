@@ -12,7 +12,6 @@ click_action_threshold = 0.0
 stock_resource = "wood"
 stock_player = 1
 stock_success_threshold = 80.0
-min_delivery_per_villager = 20.0
 carried_resource_observation_scale = 20.0
 stock_observation_scale = 1000.0
 resource_amount_scale = 200.0

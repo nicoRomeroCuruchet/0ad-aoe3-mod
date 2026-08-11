@@ -52,6 +52,16 @@ def _load_base_callback_class() -> type[Any]:
     return _import_sb3("stable_baselines3.common.callbacks", "sb3_sac").BaseCallback
 
 
+def _resolve_policy(policy: Any) -> Any:
+    """Map a config policy name to a class for this repo's custom policies."""
+
+    if policy == "SharedVillagerPolicy":
+        from .shared_policy import SharedVillagerActorCriticPolicy
+
+        return SharedVillagerActorCriticPolicy
+    return policy
+
+
 def _thaw(value: Any) -> Any:
     if isinstance(value, Mapping):
         return {key: _thaw(item) for key, item in value.items()}
@@ -412,7 +422,7 @@ class SB3Trainer:
     def fit(self, request: TrainRequest) -> Policy:
         algorithm_class = self._algorithm_class()
         parameters = _thaw(request.agent.parameters)
-        policy_name = parameters.pop("policy", "MlpPolicy")
+        policy_name = _resolve_policy(parameters.pop("policy", "MlpPolicy"))
         parameters["seed"] = request.seed
         if request.resume_from is None:
             model = algorithm_class(policy_name, request.env, **parameters)

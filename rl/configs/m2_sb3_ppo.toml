@@ -12,7 +12,6 @@ click_action_threshold = 0.0
 stock_resource = "wood"
 stock_player = 1
 stock_success_threshold = 80.0
-min_delivery_per_villager = 20.0
 carried_resource_observation_scale = 20.0
 stock_observation_scale = 1000.0
 resource_amount_scale = 200.0
@@ -24,13 +23,14 @@ backend_retry_delay = 1.0
 
 [agent]
 name = "sb3_ppo"
-policy = "MlpPolicy"
+policy = "SharedVillagerPolicy"
 verbose = 1
 n_steps = 512
 batch_size = 64
 n_epochs = 10
 gae_lambda = 0.95
-ent_coef = 0.0
+ent_coef = 0.01
+gamma = 0.9
 
 [training]
 total_steps = 200000
