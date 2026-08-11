@@ -172,3 +172,14 @@ def test_m2_configs_share_the_team_scenario_and_threshold():
     training = configs["m2_sb3_ppo.toml"].training
     assert training.solved_success_rate == 0.8
     assert training.solved_check_interval_steps == 5_000
+
+
+def test_m2_requires_every_villager_to_deliver():
+    paths = sorted(CONFIG_DIRECTORY.glob("m2_*.toml"))
+    configs = {path.name: load_experiment_config(path) for path in paths}
+
+    for config in configs.values():
+        # A total-wood threshold alone is satisfiable by one villager making
+        # several trips, so participation is part of the criterion.
+        assert config.environment.parameters["min_delivery_per_villager"] == 20.0
+        assert config.environment.parameters["horizon"] == 40

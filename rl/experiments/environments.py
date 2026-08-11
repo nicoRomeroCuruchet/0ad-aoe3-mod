@@ -190,6 +190,7 @@ _TEAM_GATHER_PARAMETERS = frozenset(
         "stock_resource",
         "stock_player",
         "stock_success_threshold",
+        "min_delivery_per_villager",
         "carried_resource_observation_scale",
         "stock_observation_scale",
         "resource_amount_scale",

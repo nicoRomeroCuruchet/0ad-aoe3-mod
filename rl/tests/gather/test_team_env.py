@@ -367,3 +367,88 @@ def test_observer_slot_must_address_a_configured_villager():
             game=game,
             actions=actions,
         )
+
+
+def _delivery_backend(stocks, carried_sequence):
+    villagers = [FakeUnit((100.0, 100.0), 11), FakeUnit((200.0, 100.0), 12)]
+    resources = [FakeUnit((300.0, 100.0), 21), FakeUnit((400.0, 100.0), 22)]
+    state = FakeState(villagers, resources, FakeUnit((50.0, 150.0), 31))
+    snapshots = [
+        {
+            "stock": {"wood": stock},
+            "carried": {"11": carried[0], "12": carried[1]},
+            "remaining": {"21": 200.0, "22": 200.0},
+        }
+        for stock, carried in zip(stocks, carried_sequence)
+    ]
+    return FakeGame(state, snapshots), FakeActions()
+
+
+def _delivery_env(game, actions, **overrides):
+    parameters = {
+        "villager_count": 2,
+        "resource_count": 2,
+        "map_size_m": 512.0,
+        "horizon": 10,
+        "sim_steps_per_action": 1,
+        "stock_success_threshold": 40.0,
+        "min_delivery_per_villager": 20.0,
+        "game": game,
+        "actions": actions,
+    }
+    parameters.update(overrides)
+    return ZeroADTeamGatherEnv("scenario", **parameters)
+
+
+def test_one_villager_delivering_everything_does_not_finish_the_episode():
+    # Villager 0 hauls two loads; villager 1 never carries anything.
+    game, actions = _delivery_backend(
+        stocks=[300.0, 300.0, 320.0, 320.0, 340.0],
+        carried_sequence=[(0.0, 0.0), (20.0, 0.0), (0.0, 0.0), (20.0, 0.0), (0.0, 0.0)],
+    )
+    env = _delivery_env(game, actions)
+    env.reset()
+
+    for _ in range(4):
+        _obs, _reward, terminated, _truncated, info = env.step(
+            np.zeros(6, dtype=np.float32)
+        )
+
+    assert info["episode_resource_stock_delta"] == pytest.approx(40.0)
+    assert info["delivered_per_villager"][0] == pytest.approx(40.0)
+    assert info["delivered_per_villager"][1] == pytest.approx(0.0)
+    assert info["working_villagers"] == 1
+    assert terminated is False
+
+
+def test_episode_finishes_once_every_villager_has_delivered():
+    # Both villagers haul one load each.
+    game, actions = _delivery_backend(
+        stocks=[300.0, 300.0, 340.0],
+        carried_sequence=[(0.0, 0.0), (20.0, 20.0), (0.0, 0.0)],
+    )
+    env = _delivery_env(game, actions)
+    env.reset()
+
+    env.step(np.zeros(6, dtype=np.float32))
+    _obs, _reward, terminated, _truncated, info = env.step(np.zeros(6, dtype=np.float32))
+
+    assert info["delivered_per_villager"] == pytest.approx((20.0, 20.0))
+    assert info["working_villagers"] == 2
+    assert info["min_delivered"] == pytest.approx(20.0)
+    assert terminated is True
+
+
+def test_participation_requirement_is_off_by_default():
+    game, actions = _delivery_backend(
+        stocks=[300.0, 340.0],
+        carried_sequence=[(0.0, 0.0), (0.0, 0.0)],
+    )
+    env = _delivery_env(game, actions, min_delivery_per_villager=0.0)
+    env.reset()
+
+    _obs, _reward, terminated, _truncated, _info = env.step(
+        np.zeros(6, dtype=np.float32)
+    )
+
+    assert terminated is True

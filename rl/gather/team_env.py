@@ -50,6 +50,7 @@ class ZeroADTeamGatherEnv(gym.Env):
         stock_resource: str = "wood",
         stock_player: int = 1,
         stock_success_threshold: float = 80.0,
+        min_delivery_per_villager: float = 0.0,
         carried_resource_observation_scale: float = 20.0,
         stock_observation_scale: float = 1000.0,
         resource_amount_scale: float = 200.0,
@@ -94,6 +95,10 @@ class ZeroADTeamGatherEnv(gym.Env):
         self.stock_resource = stock_resource
         self.stock_player = stock_player
         self.stock_success_threshold = stock_success_threshold
+        # A total-wood threshold alone is satisfiable by one villager making
+        # several trips, which is not a team task. Requiring a per-villager
+        # delivery makes participation part of the success criterion.
+        self.min_delivery_per_villager = min_delivery_per_villager
         self.backend_retries = backend_retries
         self.backend_retry_delay = backend_retry_delay
         self.observation_scales = TeamObservationScales(
@@ -131,6 +136,7 @@ class ZeroADTeamGatherEnv(gym.Env):
         self._previous_distance: tuple[float, ...] = ()
         self._target_index: tuple[int, ...] = ()
         self._cycle_active: tuple[bool, ...] = ()
+        self._delivered: tuple[float, ...] = ()
         self._closed = False
 
     # ------------------------------------------------------------------ engine
@@ -219,6 +225,7 @@ class ZeroADTeamGatherEnv(gym.Env):
             nearest_index(villager, resource_xz) for villager in villager_xz
         )
         self._cycle_active = tuple(False for _ in roster.villagers)
+        self._delivered = tuple(0.0 for _ in roster.villagers)
         stock, carried, remaining = self._read_engine(roster)
         self._initial_stock = stock
         self._previous_stock = stock
@@ -381,6 +388,14 @@ class ZeroADTeamGatherEnv(gym.Env):
             self.reward_scales,
         )
 
+        # A villager's carried load only falls when it deposits, so the drop is
+        # that villager's contribution to the team total.
+        self._delivered = tuple(
+            self._delivered[index]
+            + max(0.0, self._previous_carried[index] - carried[index])
+            for index in range(self.villager_count)
+        )
+
         # A deposit ends whichever cycles were running, mirroring M1's rule that
         # the cycle finishes when wood actually lands in the player's stock.
         if stock > self._previous_stock:
@@ -391,7 +406,10 @@ class ZeroADTeamGatherEnv(gym.Env):
         self._step_count += 1
 
         episode_delta = stock - self._initial_stock
-        terminated = episode_delta >= self.stock_success_threshold
+        everyone_delivered = min(self._delivered) >= self.min_delivery_per_villager
+        terminated = (
+            episode_delta >= self.stock_success_threshold and everyone_delivered
+        )
         truncated = not terminated and self._step_count >= self.horizon
         observation = build_team_observation(
             self._snapshot(roster, stock, carried, remaining),
@@ -405,6 +423,11 @@ class ZeroADTeamGatherEnv(gym.Env):
             "carried_resource_delta_reward": terms.carried_delta,
             "click_gather_cycle_penalty": terms.click_penalty,
             "commands": len(commands),
+            "delivered_per_villager": self._delivered,
+            "min_delivered": min(self._delivered),
+            "working_villagers": sum(
+                1 for delivered in self._delivered if delivered > 0.0
+            ),
         }
         return observation, terms.total(), terminated, truncated, info
 
