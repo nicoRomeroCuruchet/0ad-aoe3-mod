@@ -424,9 +424,17 @@ class SB3Trainer:
         parameters = _thaw(request.agent.parameters)
         policy_name = _resolve_policy(parameters.pop("policy", "MlpPolicy"))
         parameters["seed"] = request.seed
+        m1_checkpoint = parameters.pop("m1_checkpoint", None)
         if request.resume_from is None:
             model = algorithm_class(policy_name, request.env, **parameters)
             reset_num_timesteps = True
+            if m1_checkpoint is not None:
+                # Resuming keeps the checkpoint's own weights, so this only ever
+                # runs for a fresh model.
+                from .shared_policy import initialize_from_m1
+
+                initialize_from_m1(model.policy, str(m1_checkpoint))
+                print(f"m1_transfer: warm-started from {m1_checkpoint}", flush=True)
         else:
             expected_num_timesteps = _validate_checkpoint_pair(request.resume_from)
             # SB3 restores the serialized policy architecture itself and checks

@@ -78,11 +78,15 @@ class SharedVillagerActorCriticPolicy(ActorCriticPolicy):
         self,
         *args: Any,
         hidden_dim: int = 64,
-        m1_checkpoint: str | None = None,
+        m1_checkpoint: Any = None,
         **kwargs: Any,
     ) -> None:
+        # Checkpoints written before the warm start moved into the trainer carry
+        # `m1_checkpoint` in their policy_kwargs. Accept and ignore it so those
+        # checkpoints still load; applying it here would overwrite trained
+        # weights with M1's on every resume.
+        del m1_checkpoint
         self.hidden_dim = hidden_dim
-        self.m1_checkpoint = m1_checkpoint
         super().__init__(*args, **kwargs)
 
     def _villager_shape(self) -> tuple[int, int]:
@@ -113,9 +117,6 @@ class SharedVillagerActorCriticPolicy(ActorCriticPolicy):
             lr=lr_schedule(1),
             **self.optimizer_kwargs,
         )
-        if self.m1_checkpoint is not None:
-            initialize_from_m1(self, self.m1_checkpoint)
-            print(f"m1_transfer: warm-started from {self.m1_checkpoint}", flush=True)
 
 
 class M1TransferError(ValueError):

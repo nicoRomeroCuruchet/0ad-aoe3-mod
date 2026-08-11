@@ -192,3 +192,15 @@ def test_transfer_rejects_a_wider_m1_observation():
 
     with pytest.raises(M1TransferError, match="only 8"):
         initialize_from_m1(policy, "unused", loader=_loader(_FakeM1Policy(obs_dim=10)))
+
+
+def test_policy_ignores_a_checkpoints_stored_m1_path():
+    # Resuming must keep the checkpoint's trained weights, not reapply M1.
+    policy = SharedVillagerActorCriticPolicy(
+        observation_space=spaces.Box(-1.0, 1.0, shape=(4, 31), dtype=np.float32),
+        action_space=spaces.Box(-1.0, 1.0, shape=(12,), dtype=np.float32),
+        lr_schedule=lambda _progress: 3e-4,
+        m1_checkpoint="rl/runs/does-not-exist/model",
+    )
+
+    assert isinstance(policy.mlp_extractor, SharedVillagerExtractor)

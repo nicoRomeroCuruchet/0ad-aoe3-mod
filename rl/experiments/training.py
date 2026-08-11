@@ -95,21 +95,27 @@ def train_policy(
                     if check_delay > 0.0:
                         time.sleep(check_delay)
 
-                demo = evaluate(
-                    demo_env,
-                    policy,
-                    episodes=1,
-                    deterministic=True,
-                    seed=config.evaluation.seed,
-                    decision_observer=paced,
-                )
-                print(
-                    "demo: "
-                    f"reward={demo.mean_total_reward:.1f} "
-                    f"steps={demo.mean_steps:.0f} "
-                    f"success={demo.success_rate:.0%}",
-                    flush=True,
-                )
+                try:
+                    demo = evaluate(
+                        demo_env,
+                        policy,
+                        episodes=1,
+                        deterministic=True,
+                        seed=config.evaluation.seed,
+                        decision_observer=paced,
+                    )
+                except Exception as error:  # noqa: BLE001 - watching must not kill training
+                    # The demo server is a viewing convenience. Losing it must
+                    # never end a training run that is otherwise healthy.
+                    print(f"demo: unavailable ({type(error).__name__})", flush=True)
+                else:
+                    print(
+                        "demo: "
+                        f"reward={demo.mean_total_reward:.1f} "
+                        f"steps={demo.mean_steps:.0f} "
+                        f"success={demo.success_rate:.0%}",
+                        flush=True,
+                    )
             return report.success_rate
 
     request = TrainRequest(

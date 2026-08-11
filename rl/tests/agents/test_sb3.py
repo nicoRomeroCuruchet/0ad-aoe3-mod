@@ -822,3 +822,26 @@ def test_missing_stable_baselines_dependency_has_an_actionable_error(monkeypatch
 
     with pytest.raises(SB3DependencyError, match="uv sync --locked"):
         load_sb3_sac_policy("model")
+
+
+def test_resuming_does_not_reapply_the_m1_warm_start(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr("rl.agents.sb3._load_ppo_class", lambda: FakePPO)
+    warm_starts = []
+    monkeypatch.setattr(
+        "rl.agents.shared_policy.initialize_from_m1",
+        lambda policy, path: warm_starts.append(path),
+    )
+    checkpoint = tmp_path / "model"
+    _save_checkpoint(FakePPO("MlpPolicy", object()), checkpoint)
+    request = TrainRequest(
+        env=object(),
+        agent=AgentSpec(name="sb3_ppo", parameters={"m1_checkpoint": "m1/model"}),
+        total_steps=10,
+        seed=0,
+        resume_from=checkpoint,
+    )
+
+    SB3PPOTrainer().fit(request)
+
+    assert warm_starts == []
+    assert "m1_checkpoint" not in FakePPO.loaded_kwargs[-1]
