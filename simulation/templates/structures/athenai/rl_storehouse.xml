@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Entity parent="structures/athenai/storehouse">
+  <Identity>
+    <GenericName>RL Storehouse</GenericName>
+  </Identity>
+  <TerritoryInfluence>
+    <Root>true</Root>
+  </TerritoryInfluence>
+  <TerritoryDecay disable=""/>
+</Entity>

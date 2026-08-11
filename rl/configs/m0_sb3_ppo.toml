@@ -1,0 +1,32 @@
+[environment]
+name = "zero_ad_gather"
+scenario = "rl/reset_config.json"
+uri = "http://localhost:6000"
+map_size_m = 512.0
+horizon = 50
+reach_threshold = 12.0
+sim_steps_per_action = 10
+
+[agent]
+name = "sb3_ppo"
+policy = "MlpPolicy"
+verbose = 1
+n_steps = 256
+batch_size = 64
+n_epochs = 10
+gae_lambda = 0.95
+ent_coef = 0.0
+
+[training]
+total_steps = 50000
+seed = 0
+log_interval = 1
+solved_window_episodes = 20
+solved_success_rate = 0.8
+solved_min_steps = 1000
+solved_check_interval_steps = 1250
+
+[evaluation]
+episodes = 20
+deterministic = true
+seed = 1000

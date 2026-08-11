@@ -1,0 +1,44 @@
+[environment]
+name = "zero_ad_team_gather"
+scenario = "rl/scenarios/team_reset_config.json"
+uri = "http://localhost:6000"
+villager_count = 4
+resource_count = 6
+action_mode = "joint_assignment_click"
+randomize_layout = true
+map_size_m = 512.0
+# Oracle finishes in two coordinated waves; this admits recovery but rejects
+# a lucky one-shot matching that only clears the first four trees.
+horizon = 20
+sim_steps_per_action = 80
+gather_command_distance = 12.0
+click_action_threshold = 0.0
+stock_resource = "wood"
+stock_player = 1
+stock_success_threshold = 600.0
+carried_resource_observation_scale = 20.0
+stock_observation_scale = 1200.0
+resource_amount_scale = 100.0
+distance_shaping_scale = 0.02
+# Paying per unit chopped is collectable without ever delivering: four loads of
+# 20 at 0.2/4 is exactly the 4.0 plateau every run converged to while depositing
+# nothing. Wood now only pays when it lands in the stock.
+carried_resource_delta_reward_scale = 0.0
+click_gather_cycle_penalty = 1.0
+# Silence while holding a load is what lets UnitAI finish the haul, so it is
+# worth a little. Small on purpose: 20 wood in the stock is worth 20.
+carrying_no_click_reward = 0.05
+backend_retries = 2
+backend_retry_delay = 1.0
+
+[agent]
+name = "random"
+
+[training]
+total_steps = 1
+seed = 0
+
+[evaluation]
+episodes = 10
+deterministic = true
+seed = 1000

@@ -1,0 +1,25 @@
+{
+    "mapType": "random",
+    "script": "rl_gather_team.js",
+    "gameSpeed": 1,
+    "settings": {
+        "Name": "RL Gather Team",
+        "mapName": "RL Gather Team",
+        "mapType": "random",
+        "Script": "rl_gather_team.js",
+        "Seed": 0,
+        "AISeed": 0,
+        "Size": 128,
+        "CheatsEnabled": true,
+        "VictoryConditions": [],
+        "PlayerData": [
+            {
+                "Name": "Agent",
+                "Civ": "athenai",
+                "Color": { "r": 20, "g": 70, "b": 150 },
+                "AI": "",
+                "Team": -1
+            }
+        ]
+    }
+}

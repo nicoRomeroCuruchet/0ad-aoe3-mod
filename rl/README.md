@@ -1,87 +1,277 @@
-# RL Gather — Milestone 0
+# RL Gather — Milestones 0, 1 y 2
 
 Primer experimento de Reinforcement Learning sobre el mod: **SAC entrena 1 aldeano (Polites)
 para ir a 1 recurso**, usando la interfaz RL nativa de 0 A.D. (`--rl-interface`) + el cliente
 `zero_ad`, envuelto en un `gymnasium.Env`.
 
-**Estado: M0 cumplido.** El loop completo (Gymnasium ↔ Stable-Baselines3 ↔ 0 A.D.) funciona y
-el agente **aprende la política óptima**: en un run de 2000 steps el reward medio sube de
-~74 a **~151** (máximo ~150) y los episodios se acortan de 50 a ~12 (llega al recurso cada vez
-más rápido). Modelo entrenado: `rl/sac_gather.zip`.
+**Estado: M0 y M1 cumplidos; M2 usa un controlador conjunto de asignación.** M0 valida navegación con reward por acercamiento.
+M1 reutiliza la misma arquitectura modular y la misma vista de política, pero cambia el entorno
+a reward por **Δstock real** usando acción `[target_x, target_z, click_signal]`.
+Si `click_signal` está activo y el target cae sobre el árbol, el env emite un comando `gather`.
+Si `click_signal` está inactivo, el env avanza la simulación sin comando para que UnitAI de
+0 A.D. pueda completar el ciclo de juntar/volver/depositar. Si la política clickea durante ese
+ciclo, el click se envía igual y puede interrumpirlo: aprender a no clicar también es parte de M1.
+El entorno lee el stock de madera con `game.evaluate(...)` y recompensa la madera
+efectivamente depositada. M1 suma shaping opcional por acercarse, entrar en rango de
+recolección, empezar a cargar madera, no clicar mientras UnitAI completa el ciclo útil, y
+penalizar clicks que interrumpen ese ciclo.
+
+M2 escala a 4 aldeanos y 6 robles dedicados. Cada roble tiene 100 de madera y admite sólo un
+recolector; los seis se ubican a 60° entre sí en un anillo centrado en la cabaña. En cada reset
+un seed reproducible rota el anillo completo, de modo que la política no puede memorizar una
+dirección absoluta. El objetivo es **`Δstock colectivo >= 600`** dentro del horizonte: hay que
+vaciar y entregar los seis árboles en dos oleadas. No hay cuota por aldeano.
+
+La acción de M2 es una sola categoría global `Discrete(1045)`. Cada categoría representa un
+matching parcial de los cuatro aldeanos: para cada uno, `NO_CLICK` o `TREE_j`, con la restricción
+de que dos aldeanos nunca elijan el mismo árbol en la misma decisión. Un adaptador determinista
+convierte esa asignación en los cuatro `[x, z, click]` exactos que ya entiende el entorno; por lo
+tanto PPO aprende **qué reparto mandar a los aldeanos libres**, no la identidad
+`coordenada_del_árbol → misma_coordenada_del_click`, ni recibe una acción semántica `gather`.
+El ejecutor local usa estado ya observado para reservar el árbol que alguien corta e invalidar
+elecciones de árboles agotados; `NO_CLICK` mientras UnitAI corta o transporta sigue siendo una
+decisión aprendida, porque un click alternativo puede interrumpirlo. Eso evita comandos
+físicamente imposibles sin entregar una asignación oculta a la red.
+El actor puntúa el matching completo y el crítico ve el equipo completo. Las observaciones siguen
+incluyendo las posiciones relativas y la madera restante de todos los árboles: M2 no es
+exploración. La rotación aleatoria prueba coordinación sobre orientaciones nuevas, no percepción
+bajo niebla de guerra.
+
+Al evaluar o renderizar de forma determinista, el categórico primero suma la probabilidad de cada
+patrón binario de quién hace click y luego elige el matching más probable dentro de ese patrón.
+Así el único label `NO_CLICK` global no gana artificialmente frente a muchos matchings productivos
+equivalentes. El muestreo, la entropía y los log-probs de PPO siguen siendo el categórico nativo.
+
+Los checkpoints y videos M2 anteriores al anillo de 6×100 y a `Discrete(1045)` son **artefactos
+legacy**: usaban el objetivo `+80` y un espacio de acción distinto, por lo que no son comparables
+ni compatibles con el benchmark vigente.
 
 ## Cómo correr todo (paso a paso)
 
 > **Reglas de oro:**
 > 1. Todos los comandos se corren **desde la raíz del repo** (donde está la carpeta `rl/`),
->    si no, los `import rl.*` fallan: `cd ~/dev/research/0ad-aoe3-mod`
-> 2. Siempre usá el **Python 3.11** standalone (no el del sistema):
->    `~/Documents/0ad/.toolchain/python/bin/python3`
-> 3. **Un server = un cliente.** El server se cierra cuando el cliente (eval/train) se
->    desconecta → relanzá `run_server.sh` para cada corrida.
+>    si no, los `import rl.*` fallan.
+> 2. Usá los comandos `make`: el repo fija Python 3.11 y todas las dependencias en `uv.lock`.
+> 3. Mantené abierto el proceso de 0 A.D. mientras entrenás o evaluás.
 
 ### Paso 0 — Instalar dependencias (una sola vez)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m pip install -r rl/requirements.txt
-$PY -m pip install ~/Documents/0ad/source/tools/rlclient/python   # cliente zero_ad
+cd /ruta/al/0ad-aoe3-mod
+# Si `uv` no existe en tu terminal Ubuntu:
+sudo apt install pipx
+pipx install uv
+export PATH="$HOME/.local/bin:$PATH"
+
+make setup
 ```
 
-> Si `~/Documents/0ad/.toolchain` no existe, recrealo según `MANUAL.md` (Python 3.11 efímero),
-> o usá cualquier otro Python 3.11 con esas deps.
+Si usaste el instalador standalone de `uv` desde una terminal de VS Code Snap y
+lo instaló bajo `~/snap/code/.../.local/bin`, corré el `source .../env` que
+imprime el instalador, o simplemente repetí `make setup`; el Makefile también
+busca esa ruta de Snap.
 
-### Paso 1 — Arrancar el server de 0 A.D. (Terminal 1)
+Eso crea `.venv/` con Python 3.11, SAC/SB3, PyTorch CPU y el cliente `zero_ad` fijado al
+commit oficial de 0 A.D. Release 28. `pyproject.toml` declara las dependencias y `uv.lock`
+fija las versiones y hashes exactos. Esos dos archivos son la única fuente de dependencias.
+`make setup` es un wrapper corto de `uv sync --locked`; corré `make help` para listar todos
+los comandos disponibles.
+
+### Paso 1 — Construir y arrancar el server de 0 A.D. (Terminal 1)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-bash rl/run_server.sh
+make engine-observer  # sólo la primera vez; compila 0 A.D. Release 28
+make server           # headless, recomendado para entrenar
+# o, para usar --agent-view:
+make server-view
 ```
-Esperá hasta que imprima **`Server RL listo en 127.0.0.1:6000`** (se abre la ventana del juego).
-Dejá esta terminal abierta. `Ctrl+C` para detener el server.
+Esperá hasta que imprima **`RL interface listening on 127.0.0.1:6000`**. `make server` no abre
+una ventana; `make server-view` sí. Dejá esta terminal abierta. `Ctrl+C` detiene el server.
 
 ### Paso 2 — Correr la política / evaluar (Terminal 2)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m rl.eval --mode stochastic --delay 0.4 --verbose
+make oracle EPISODES=1 ARGS="--mode deterministic --delay 0.5 --agent-view --verbose"
 ```
-Esto carga el modelo `rl/sac_gather.zip` y **ejecuta la política**: el aldeano camina hacia el
-árbol en la ventana de 0 A.D.
+Esto ejecuta el **oracle** (baseline que apunta directamente a las coordenadas del recurso): el
+aldeano camina hacia el árbol en la ventana de 0 A.D. Para correr M1 con stock real:
+
+```bash
+make m1-oracle EPISODES=1 ARGS="--mode deterministic --delay 0.5 --agent-view --verbose"
+```
+
+En M1, `--verbose` también imprime `stock` y `dstock` cuando la madera entra al stock del
+jugador. Para comprobar M2 con el oracle de asignación:
+
+```bash
+.venv/bin/python -m rl.eval --experiment rl/configs/m2_oracle.toml \
+  --episodes 1 --mode deterministic --agent-view --verbose
+```
+
+Para evaluar un modelo aprendido, indicá su experimento y checkpoint:
+
+```bash
+make eval MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
+  TRUST_MODEL=1 ARGS="--mode both"
+# o para un checkpoint entrenado con M1:
+make m1-eval MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
+  TRUST_MODEL=1 ARGS="--mode both"
+# M2 (PPO categórico):
+.venv/bin/python -m rl.eval --experiment rl/configs/m2_sb3_ppo.toml \
+  --model rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model --trust-model --mode both
+```
+
+Reemplazá `REEMPLAZAR_CON_LA_CORRIDA` por el directorio exacto que imprime `rl.train`;
+no copies los caracteres `<` y `>` en un comando de shell.
+
+> Los checkpoints de SB3 pueden contener objetos Python serializados. Cargá sólo modelos que
+> generaste vos o cuya fuente confiás; `--trust-model` hace explícita esa decisión.
+
+`--agent-view` abre una segunda ventana del observer. En M0/M1 se centra en el Polites y usa su
+rango vivo de `Vision`; en M2 calcula una caja alrededor de los cuatro aldeanos, los árboles y el
+depósito, y centra/ensancha una única cámara para mostrar el equipo completo. La imagen viene
+directamente del renderer de 0 A.D.: muestra terreno, modelos, animaciones y la niebla de guerra
+real del Player 1. No mueve la cámara principal.
+Debajo de la imagen se conserva el input normalizado que recibe la política. M0 usa cinco
+valores geométricos; M1 agrega `carried_wood_norm` y `stock_wood_norm` para que la política pueda
+distinguir cuándo conviene dejar correr UnitAI. La advertencia explícita sigue siendo válida:
+M0/M1 todavía entregan las coordenadas globales del árbol aunque esté fuera de la visión física;
+M2 entrega las posiciones relativas y cantidades de todos los árboles. Sus slots quedan estables
+durante el episodio: cuando un roble se agota y desaparece del engine, conserva su slot con
+cantidad cero para que ni la observación ni el significado de las 1045 acciones cambien.
+Esos píxeles son sólo para depuración; la política no los consume.
+
+La primera compilación con `make engine-observer` tarda, ocupa aproximadamente 7 GB y queda en
+`.runtime/0ad-observer/`. En Ubuntu, instalá primero:
+
+```bash
+sudo apt install build-essential cmake curl libboost-dev \
+  libcurl4-gnutls-dev libenet-dev libfmt-dev libfreetype-dev libicu-dev \
+  libpng-dev libsdl2-dev libsodium-dev libx11-dev libxml2-dev llvm m4 \
+  patch pkg-config python3 uuid-dev xvfb zlib1g-dev
+```
+
+Este build de visualización omite audio, lobby y Atlas. El observer usa el backend OpenGL de Release 28;
+si no hay un display X11, `make server-view` intenta usar `xvfb-run` automáticamente. Mantené visible
+la ventana del juego y con un tamaño de por lo menos 512×512 mientras uses `--agent-view`; esa
+ventana de debug necesita una sesion grafica real.
 
 Opciones de `rl.eval`:
 
 | Flag | Para qué |
 |------|----------|
-| `--mode stochastic\|deterministic\|both` | `stochastic` llega al árbol; `deterministic` usa la acción media |
-| `--delay 0.4` | pausa (seg) entre pasos, para **seguir la partida con el ojo** |
-| `--verbose` | imprime paso a paso (target, distancia, reward) |
-| `--episodes N` | cuántos episodios correr (default 10) |
+| `--mode configured\|stochastic\|deterministic\|both` | por defecto respeta `evaluation.deterministic`; `both` compara ambos modos |
+| `--delay 0.5` | pausa (seg) entre decisiones; con `--agent-view`, pausa antes de ejecutar la acción |
+| `--agent-view` | abre el render real del LOS; M2 encuadra al equipo completo y audita aparte el input de la política |
+| `--verbose` | imprime paso a paso (observación, target, distancia, stock si existe, reward) |
+| `--episodes N` | cuántos episodios correr (la config fija usa 1 para oracle, 10 para random y 20 para SAC) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
-| `--model rl/sac_gather` | qué modelo cargar |
+| `--record-agent-view DIR` | guarda frames PNG del observer y un `index.html` reproducible sin Tk |
+| `--record-agent-view-video FILE.mp4` | codifica esos frames renderizados a MP4 con `ffmpeg` |
+| `--allow-schematic-recording` | fallback explícito a frames esquemáticos si el renderer no captura |
+| `--experiment rl/configs/...toml` | entorno, agente, seeds e hiperparámetros |
+| `--model rl/runs/.../model` | checkpoint; sólo hace falta para agentes aprendidos |
+| `--trust-model` | confirma que el checkpoint es confiable antes de deserializarlo |
+| `--allow-remote-server` | habilita explícitamente un server no local; sólo si confiás en él |
 
 ### Reentrenar (opcional)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod          # con el server del Paso 1 corriendo
-PY=~/Documents/0ad/.toolchain/python/bin/python3
-$PY -m rl.train --timesteps 2000        # entrena SAC y guarda rl/sac_gather.zip
+make train
+# M1: reward por madera real depositada
+make m1-train
+# Mismo criterio de parada, algoritmo on-policy:
+make ppo-train
+make m1-ppo-train
+# M2 usa PPO: SAC de SB3 sólo acepta acciones continuas Box, mientras que M2
+# elige un matching global Discrete(1045).
+.venv/bin/python -m rl.train --experiment rl/configs/m2_sb3_ppo.toml
 ```
+
+`sb3_ppo` usa exactamente el mismo entorno, seeds, criterio de parada y evaluación final
+que `sb3_sac`; sólo cambia el algoritmo (PPO recolecta rollouts de `n_steps` y no guarda
+replay buffer, así que su checkpoint es sólo `model.zip` + manifiesto). Eso hace que las dos
+corridas sean comparables paso a paso.
+
+Las configs de entrenamiento no dependen sólo de un número fijo de pasos: **el criterio de parada es
+completar la tarea**. El agente entrena por tramos y, después de cada tramo elegible, pausa el
+aprendizaje para evaluar la política determinista. Una truncación sin terminación exitosa —por
+horizonte o una interrupción del backend— cuenta como fallo; si el objetivo se alcanza exactamente
+en el último paso, la terminación exitosa sí cuenta. El reward de shaping no puede activar este
+criterio. M0/M1 exigen al menos 80% de éxito en 20 episodios; M0 chequea cada 1.250 pasos, exige al
+menos 1.000 pasos de vida del modelo y tiene un tope de seguridad de 50.000. M1 chequea cada 2.500,
+exige 2.500 y tiene un tope de 500.000. M2 evalúa después de su primer rollout de 512 decisiones y
+exige al menos 95% en 20 orientaciones rotadas retenidas: así se selecciona por éxito real
+generalizado, no por el reward estocástico de entrenamiento. Al terminar, ambos vuelven a correr la
+evaluación determinista configurada y la guardan en
+`metrics.json`. M0/M1 usan escenarios fijos; M2 inyecta en cada reset un seed reproducible que
+rota su anillo de árboles. Así, las seeds de evaluación constituyen un conjunto de orientaciones
+retenidas y no la repetición de un único mapa. La posición de los árboles sigue siendo observable:
+esto mide asignación y ejecución, no generalización visual ni exploración.
+
+`STEPS=N` reemplaza sólo ese tope para una corrida de diagnóstico; no desactiva el criterio de
+éxito. Al reanudar, los pasos mínimos usan el contador acumulado del modelo y la política debe
+aprobar un chequeo determinista nuevo en esa corrida.
+
+Para continuar M1 desde un checkpoint propio, usá `MODEL` como origen de reanudación y
+confirmá que confiás en ese archivo:
+
+```bash
+make m1-train MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
+  TRUST_MODEL=1
+```
+
+Cada corrida crea una carpeta ignorada por git en `rl/runs/` con el modelo, la config resuelta,
+las métricas por episodio y metadata. El comando imprime la ruta exacta al terminar.
+La config y `status=running` se escriben al crear la corrida; un fallo previo al checkpoint queda
+marcado como `failed` o `interrupted` en vez de dejar un directorio vacío.
+El modelo se guarda **antes** de la evaluación final: si el server se corta durante esa etapa,
+el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente salvo que agregues
+`--force`.
+Cada checkpoint SAC incluye un archivo hermano `*.replay_buffer.pkl` y un manifiesto
+`*.checkpoint.json` con checksums y timestep. El modelo y el replay se escriben primero en
+temporales y el manifiesto confirma la pareja sólo después de ambos reemplazos; una escritura
+interrumpida o una pareja mezclada se rechaza al reanudar. Conservá los tres archivos para no
+descartar la experiencia acumulada. `TRUST_MODEL=1` cubre los archivos serializados. Los
+checkpoints antiguos sin manifiesto siguen aceptándose; si sólo tienen el modelo, SAC vuelve a
+llenar un buffer inicial antes de actualizar la red.
+Mientras entrena SAC, también guarda `best_model` cuando mejora el reward medio del siguiente
+bloque de 10 episodios terminados. Esto evita elegir un outlier y reduce escrituras síncronas;
+usá ese checkpoint para inspeccionar el reward, no como prueba de que el entorno está resuelto.
+El criterio de parada mira terminaciones exitosas y el `model` final conserva exactamente el
+estado que alcanzó el criterio (o el tope de seguridad).
+
+El entrenamiento imprime la carpeta de la corrida **antes** de empezar y SB3 escribe métricas en
+`training/progress.csv` y `training/progress.json` dentro de esa carpeta. Para seguirlo en vivo:
+
+```bash
+tail -f rl/runs/ULTIMA_CORRIDA/training/progress.csv
+```
+
+`training.log_interval = 1` en los TOML hace que SB3 vuelque métricas cada episodio terminado;
+podés cambiarlo por corrida con `make m1-train ARGS="--log-interval 2"`.
+
+`make train` y `make m1-train` no capturan imágenes durante SAC. Para depurar visualmente una
+corrida, arrancá el engine con `make server-view` y agregá la vista de forma explícita, por
+ejemplo `make train ARGS="--agent-view --delay 0.5"`. La vista se actualiza con cada decisión y
+sigue activa durante la evaluación final.
 
 ### Correr los tests (no necesitan el juego)
 
 ```bash
-cd ~/dev/research/0ad-aoe3-mod
-~/Documents/0ad/.toolchain/python/bin/python3 -m pytest rl/tests/ -v
+make test
+# Tests, lint, imports, dependencias y lockfile:
+make verify
 ```
 
 ### Si algo se traba
 
 ```bash
-pkill -9 -f pyrogenesis          # matar servers colgados (OJO: el proceso se llama 'main')
+pgrep -af 'pyrogenesis|0ad'      # buscá el PID exacto del server colgado
+kill 12345                       # reemplazá 12345 por ese PID; probá sin -KILL primero
 ```
-y relanzá el Paso 1. (Detalle en "Lecciones del server headless" más abajo.)
+Si no responde después de unos segundos, usá `kill -KILL 12345` con el mismo PID y relanzá el
+Paso 1. (Detalle en "Lecciones del server headless" más abajo.)
 
 ## Qué vas a ver
 
@@ -97,15 +287,29 @@ Con `--mode both --verbose`:
 
 | Archivo | Qué es |
 |---------|--------|
-| `gather/core.py` | Funciones puras (geometría, normalización, observación, reward) — con tests |
-| `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad` |
-| `train.py` | Entrena SAC + eval rápida al final |
-| `eval.py` | Corre/evalúa un modelo guardado (`--mode`, `--delay`, `--verbose`, `--replay`, `--episodes`) |
-| `run_server.sh` | Lanza 0 A.D. headless con la interfaz RL de forma confiable |
+| `agents/base.py` | Contratos mínimos `Policy`/`Trainer` y resultados inmutables |
+| `agents/registry.py` | Registro explícito de implementaciones y capacidades |
+| `agents/baselines.py` | Políticas random y oracle para validar/comparar |
+| `agents/sb3.py` | Adaptadores de SAC y PPO de Stable-Baselines3; import opcional y tardío |
+| `agents/assignment_policy.py` | Actor/crítico M2 estructurado: puntúa matchings globales válidos y usa un categórico de 1045 acciones |
+| `agents/custom/` | Lugar de las implementaciones de los alumnos |
+| `experiments/` | Config TOML, construcción, entrenamiento, evaluación y artefactos comunes |
+| `configs/` | Experimentos versionados y comparables (`m0_*.toml`, `m1_*.toml`, `m2_*.toml`) |
+| `gather/core.py` | Funciones puras (geometría, normalización, observación, rewards) — con tests |
+| `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad`, con backend inyectable |
+| `gather/team_env.py` | M2: estado conjunto, anillo rotado por seed, slots seguros ante agotamiento y reward colectivo |
+| `gather/assignment_actions.py` | Enumera los 1045 matchings sin colisiones y los traduce a clicks de mapa |
+| `gather/team_render.py` | Fallback top-down que encuadra al equipo completo sin un POV único |
+| `gather/agent_view.py` | Ventana debug opcional con el frame real producido por el engine |
+| `gather/engine_observer.py` | Cliente y validación del endpoint de frames PPM del engine |
+| `train.py`, `eval.py` | CLIs finas: parsean opciones y delegan a los módulos anteriores |
+| `../run_game.sh`, `run_server.sh` | Lanzadores RL para AppImage y build desde source |
+| `../engine/` | Patch versionado de Release 28 y builder del observer renderizado |
 | `reset_config.json` | Config de la partida (mapa `random/rl_gather`, civ athenai, 1 jugador) |
-| `tests/` | `pytest rl/tests/` (lógica pura, no necesita el juego) |
+| `tests/` | Contratos unitarios/integración offline; no necesitan el juego ni `zero_ad` |
 
-El mapa determinista (1 Polites + 1 árbol) está en `maps/random/rl_gather.{js,json}` (parte del mod).
+El mapa determinista (1 Polites + 1 árbol + 1 storehouse) está en
+`maps/random/rl_gather.{js,json}` (parte del mod).
 
 ## Lecciones del server headless (encapsuladas en `run_server.sh`)
 
@@ -118,10 +322,14 @@ El mapa determinista (1 Polites + 1 árbol) está en `maps/random/rl_gather.{js,
 
 ## Roadmap
 
-- **M1** — Reward = Δstock real (emitir `gather`) en vez de acercamiento. *Antes*, hacer el `env`
-  **resiliente** (reintentar/relanzar el server ante desconexiones) para entrenamientos largos confiables.
-- **M2** — 4 aldeanos + varios recursos. Acción `Box(8,)` (un punto por aldeano), reward = Δstock
-  colectivo. Sigue con posiciones **conocidas** (observación incluye los recursos).
+- **M1** — Acción = `[target_x, target_z, click_signal]`; click cerca del árbol emite `gather`,
+  no-click deja correr UnitAI; reward = Δstock real en vez de acercamiento. ✓ El env puede
+  reintentar/reconectar y trunca de forma limpia un episodio interrumpido.
+- **M2** — 4 aldeanos + 6 robles de 100, con un recolector máximo por roble. Un solo
+  `Discrete(1045)` elige un matching parcial `NO_CLICK | TREE_0 | ... | TREE_5` sin colisiones;
+  el entorno lo ejecuta como clicks normales de mapa. El anillo equiangular alrededor de la
+  cabaña se rota por seed y se resuelve sólo al entregar `Δstock colectivo >= 600`, sin cuotas
+  individuales. Las posiciones de recursos son conocidas: sigue siendo coordinación, no M3.
 - **M3+ (idea futura) — Exploración con niebla de guerra.** Un salto de dificultad: el agente
   **no** conoce dónde están los recursos y tiene que **explorar para encontrarlos**.
   Implica:
@@ -132,7 +340,46 @@ El mapa determinista (1 Polites + 1 árbol) está en `maps/random/rl_gather.{js,
     recurrencia/memoria o curiosidad/intrinsic reward).
   - Es un problema cualitativamente distinto a M0–M2 (búsqueda, no navegación a objetivo conocido).
 
-## Para alumnos / por dónde empezar
+## Arquitectura modular para alumnos
+
+La dependencia central va en una sola dirección:
+
+```text
+config TOML -> registry -> Trainer.fit(TrainRequest) -> Policy
+                                                   |
+entorno Gym ---------------------------------------+-> evaluator -> métricas
+```
+
+El evaluador sólo llama `Policy.act()`: no sabe si la política viene de SAC, una red propia,
+una tabla, random o el oracle. Cada `Trainer` es dueño de su loop de actualización. Por eso se
+puede cambiar un algoritmo sin tocar el entorno y comparar todos con exactamente los mismos
+episodios y seeds.
+
+Para comprobar primero el pipeline y los dos extremos de referencia:
+
+```bash
+make random ARGS="--mode deterministic"
+make oracle ARGS="--mode deterministic"
+make m1-oracle ARGS="--mode deterministic --verbose"
+```
+
+Para inspeccionar un rollout sin ventana Tk, grabá el observer renderizado a PNG + HTML + MP4:
+
+```bash
+make m1-oracle EPISODES=1 ARGS="--mode deterministic --verbose --record-agent-view rl/runs/m1-oracle-rollout --record-agent-view-video rl/runs/m1-oracle-rollout.mp4"
+make m1-eval MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/best_model TRUST_MODEL=1 EPISODES=1 \
+  ARGS="--mode deterministic --verbose --record-agent-view rl/runs/m1-model-rollout --record-agent-view-video rl/runs/m1-model-rollout.mp4"
+```
+
+El oracle **no aprende**: usa la posición del recurso presente en la observación y marca un techo
+de navegación para detectar errores del entorno/reward. Random marca el piso. El algoritmo del
+alumno debería compararse con ambos.
+
+Para sumar una implementación propia, seguí `agents/custom/README.md`: implementá un `Policy`,
+un `Trainer`, agregá una entrada explícita al registro y un TOML. Los tests del agente van en
+`tests/agents/` y usan entornos falsos; el test contra 0 A.D. queda como integración separada.
+
+## Por dónde empezar
 
 **La parte difícil ya está hecha: la infraestructura para entrenar.** Conectar el motor de 0 A.D.,
 un entorno tipo Gym estable, lanzar el server headless de forma confiable, el mapa y la config —
@@ -142,9 +389,9 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 
 | Ya hecho (no lo toquen, reúsenlo) | Dónde |
 |---|---|
-| Lanzar 0 A.D. headless de forma confiable | `run_server.sh` |
+| Lanzar 0 A.D. con la interfaz RL | `make engine-observer` una vez; después `make server` (headless) o `make server-view` (debug) |
 | Entorno Gym (`reset`/`step`/obs/acción) | `gather/env.py` (lo **extienden**, no lo reescriben) |
-| Loop de entrenamiento + evaluación | `train.py`, `eval.py` |
+| Orquestación de entrenamiento + evaluación | `experiments/training.py`, `experiments/evaluation.py` |
 | Conexión al motor y acciones (`walk`/`gather`/…) | cliente `zero_ad` |
 | Mapa/escenario parametrizable | `maps/random/rl_gather.js` |
 | Funciones puras testeadas (geometría, obs, reward) | `gather/core.py` + `tests/` |
@@ -152,23 +399,30 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 ### Orden sugerido (rampa de dificultad)
 
 1. **Arrancá corriendo lo que ya está** (sección "Cómo correr todo"): mirá al agente de M0 ir al recurso.
-2. **M1** — cambiá el reward a Δstock real (que junte, no que se acerque). Tractable, reusa todo.
-3. **M2** — escalá a 4 aldeanos + varios recursos (acción `Box(8,)`). Sigue con posiciones conocidas.
+2. **M1** — corré `make m1-oracle` y `make m1-train`: ahora el reward es Δstock real.
+3. **M2** — coordiná 4 aldeanos sobre 6 robles exclusivos mediante un matching global de 1045
+   opciones. El anillo se rota por seed; las posiciones siguen siendo conocidas.
 4. **M3+ (capstone)** — exploración con niebla de guerra. Ambicioso; encaralo al final.
 
 ### Dónde meter mano (enganches concretos)
 
-- **Reward:** `gather_reward()` en `gather/core.py` (y leer el stock con `game.evaluate(...)` desde `env.py`).
+- **Reward:** `reward_mode` en los TOML; `gather_reward()` / `stock_delta_reward()` en
+  `gather/core.py`; lectura de stock con `game.evaluate(...)` desde `env.py`.
 - **Observación:** `build_observation()` en `gather/core.py` + `_positions()` en `env.py`.
-- **Acción / nº de aldeanos:** `action_space` y `step()` en `gather/env.py`.
+  En M1, `resource_state_observation` agrega madera cargada y stock actual normalizados;
+  `lifecycle_state_observation` suma la posición del depósito y si el ciclo gather/retorno
+  autónomo sigue activo. Esos campos evitan confundir "esperar el depósito automático" con
+  "el retorno fue interrumpido y hay que volver a ordenarlo".
+- **Acción / nº de aldeanos:** `action_space` y `step()` en `gather/env.py`; en M1
+  `[target_x, target_z, click_signal]` separa apuntar de clicar.
 - **Escenario (recursos, tamaño, niebla):** `maps/random/rl_gather.js` + `reset_config.json`.
-- **Algoritmo / hiperparámetros:** `train.py` (hoy `SAC("MlpPolicy", ...)`).
+- **Algoritmo:** un `Policy` + `Trainer` en `agents/custom/`, conectado en `agents/registry.py`.
+- **Hiperparámetros:** un TOML propio en `configs/`; no se hardcodean en `train.py`.
 
 ### Dos advertencias honestas
 
-1. **Cierren primero la resiliencia del `env`** (la tarea-prep de M1: reintentar/relanzar el server
-   ante desconexiones). Hoy el server se cae solo y los entrenamientos largos se cortan — y RL
-   necesita MUCHAS muestras. Es la única pieza de infra que falta y la van a agradecer.
+1. **Para corridas largas, preferí M1 con retries activos** (`backend_retries` en el TOML) y
+   relanzá el server si el proceso externo quedó colgado.
 2. **La exploración (M3+) es mucho más difícil de entrenar** que M0–M2 (reward esparso, hay que
    aprender a explorar; quizás política con memoria/recurrencia, ej. `RecurrentPPO` de `sb3-contrib`).
    No la encaren como primer proyecto: hagan M1/M2 de calentamiento.

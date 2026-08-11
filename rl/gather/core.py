@@ -1,6 +1,32 @@
 import numpy as np
 
 
+GATHER_OBSERVATION_LABELS = (
+    "villager_x_norm",
+    "villager_z_norm",
+    "resource_x_norm",
+    "resource_z_norm",
+    "distance_norm",
+)
+
+GATHER_RESOURCE_OBSERVATION_LABELS = (
+    *GATHER_OBSERVATION_LABELS,
+    "carried_wood_norm",
+    "stock_wood_norm",
+)
+
+GATHER_LIFECYCLE_OBSERVATION_LABELS = (
+    *GATHER_RESOURCE_OBSERVATION_LABELS,
+    "dropsite_x_norm",
+    "dropsite_z_norm",
+    "gather_cycle_active",
+)
+
+# Mirrors Vision/Range inherited by units/athenai/polites from the 0 A.D.
+# public template template_unit_support_female_citizen.
+POLITES_VISION_RADIUS_M = 32.0
+
+
 def xz(pos):
     """0 A.D. position() ya devuelve [x, z] en metros (2 elementos)."""
     return (float(pos[0]), float(pos[1]))
@@ -15,6 +41,14 @@ def normalize_coord(value, map_size_m):
     return 2.0 * value / map_size_m - 1.0
 
 
+def normalize_non_negative(value, scale):
+    """Non-negative scalar -> [0, 1], clipped at the configured scale."""
+    parsed_scale = float(scale)
+    if parsed_scale <= 0.0:
+        raise ValueError("scale must be positive")
+    return float(np.clip(float(value) / parsed_scale, 0.0, 1.0))
+
+
 def denormalize_action(action, map_size_m):
     """accion [-1, 1] -> metros [0, map_size_m]; devuelve (x, z)."""
     x = (float(action[0]) + 1.0) * 0.5 * map_size_m
@@ -22,20 +56,78 @@ def denormalize_action(action, map_size_m):
     return (x, z)
 
 
-def build_observation(villager_xz, resource_xz, map_size_m):
+def build_observation(
+    villager_xz,
+    resource_xz,
+    map_size_m,
+    *,
+    carried_resource=None,
+    carried_resource_scale=1.0,
+    resource_stock=None,
+    resource_stock_scale=1.0,
+    dropsite_xz=None,
+    gather_cycle_active=None,
+):
     d = distance(villager_xz, resource_xz)
-    return np.array([
+    values = [
         normalize_coord(villager_xz[0], map_size_m),
         normalize_coord(villager_xz[1], map_size_m),
         normalize_coord(resource_xz[0], map_size_m),
         normalize_coord(resource_xz[1], map_size_m),
         d / map_size_m,
-    ], dtype=np.float32)
+    ]
+    if carried_resource is not None or resource_stock is not None:
+        if carried_resource is None or resource_stock is None:
+            raise ValueError("carried_resource and resource_stock must be provided together")
+        values.extend(
+            [
+                normalize_non_negative(carried_resource, carried_resource_scale),
+                normalize_non_negative(resource_stock, resource_stock_scale),
+            ]
+        )
+    if dropsite_xz is not None or gather_cycle_active is not None:
+        if dropsite_xz is None or gather_cycle_active is None:
+            raise ValueError(
+                "dropsite_xz and gather_cycle_active must be provided together"
+            )
+        if carried_resource is None or resource_stock is None:
+            raise ValueError(
+                "lifecycle state requires carried_resource and resource_stock"
+            )
+        if not isinstance(gather_cycle_active, (bool, np.bool_)):
+            raise ValueError("gather_cycle_active must be a boolean")
+        values.extend(
+            [
+                normalize_coord(dropsite_xz[0], map_size_m),
+                normalize_coord(dropsite_xz[1], map_size_m),
+                float(gather_cycle_active),
+            ]
+        )
+    return np.array(values, dtype=np.float32)
 
 
 def gather_reward(prev_dist, cur_dist):
     return float(prev_dist - cur_dist)
 
 
+def stock_delta_reward(prev_stock, cur_stock):
+    return float(cur_stock - prev_stock)
+
+
 def is_reached(cur_dist, threshold):
     return bool(cur_dist < threshold)
+
+
+def nearest_index(origin_xz, candidates_xz):
+    """Index of the closest candidate; ties resolve to the lowest index."""
+    candidates = list(candidates_xz)
+    if not candidates:
+        raise ValueError("nearest_index requires at least one candidate")
+    best_index = 0
+    best_distance = distance(origin_xz, candidates[0])
+    for index in range(1, len(candidates)):
+        candidate_distance = distance(origin_xz, candidates[index])
+        if candidate_distance < best_distance:
+            best_index = index
+            best_distance = candidate_distance
+    return best_index

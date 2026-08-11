@@ -1,0 +1,345 @@
+#!/usr/bin/env bash
+# Build the exact 0 A.D. Release 28 source with the RL observer patch.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUNTIME_ROOT="${OAD_OBSERVER_RUNTIME:-$REPO_ROOT/.runtime/0ad-observer}"
+ARCHIVE_NAME="0ad-0.28.0-unix-build.tar.xz"
+ARCHIVE="$RUNTIME_ROOT/downloads/$ARCHIVE_NAME"
+SOURCE_ROOT="$RUNTIME_ROOT/source"
+SOURCE_DIR="$SOURCE_ROOT/0ad-0.28.0"
+PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-agent-observer.patch"
+THROUGHPUT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-throughput.patch"
+STEP_BATCH_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-step-batching.patch"
+IDLE_WAIT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-idle-wait.patch"
+LEGACY_FOCUS_OBSERVER_PATCH_SHA256="2250ecb98256c82bc3ae6c36ce3061ea12dfc2989594b0671c655e7c77bb1385"
+LEGACY_STEP_BATCH_PATCH_SHA256="15ece053ca504514322c69e202129d30369dd767222b483dd13d239bdf6d8d7d"
+SOURCE_URL="https://releases.wildfiregames.com/$ARCHIVE_NAME"
+SOURCE_SHA256="27e217755ef76a922fe58dbf593d96e54b6ed2375d23f548c35619aa6bd5a42a"
+RUSTUP_VERSION="1.28.2"
+RUST_TOOLCHAIN="1.85.1"
+RUSTUP_INIT="$RUNTIME_ROOT/downloads/rustup-init-$RUSTUP_VERSION-x86_64"
+RUSTUP_SHA256="20a06e644b0d9bd2fbdbfd52d42540bdde820ea7df86e92e533c073da0cdd43c"
+JOBS="${JOBS:--j$(nproc)}"
+
+if [[ ! "$JOBS" =~ ^-j[1-9][0-9]*$ ]]; then
+	printf 'JOBS must have the form -jN with N positive: %s\n' "$JOBS" >&2
+	exit 2
+fi
+
+mkdir -p "$RUNTIME_ROOT"
+if ! command -v flock >/dev/null 2>&1; then
+	printf '%s\n' 'The observer builder requires `flock` from util-linux.' >&2
+	exit 1
+fi
+exec {builder_lock_fd}>"$RUNTIME_ROOT/.observer-build.lock"
+if ! flock --nonblock "$builder_lock_fd"; then
+	printf 'Another observer build is already using %s\n' "$RUNTIME_ROOT" >&2
+	exit 1
+fi
+
+download_verified() {
+	local url="$1"
+	local destination="$2"
+	local checksum="$3"
+	local description="$4"
+	local temporary
+
+	mkdir -p "$(dirname "$destination")"
+	if [[ -f "$destination" ]] && \
+		printf '%s  %s\n' "$checksum" "$destination" | sha256sum --check --status; then
+		return
+	fi
+	if [[ -f "$destination" ]]; then
+		printf 'Cached %s is incomplete or corrupt; downloading it again.\n' "$description"
+	fi
+	temporary="$(mktemp "${destination}.partial.XXXXXX")"
+	if ! curl --proto '=https' --tlsv1.2 --fail --location --retry 2 \
+		--output "$temporary" "$url"; then
+		rm -f "$temporary"
+		return 1
+	fi
+	if ! printf '%s  %s\n' "$checksum" "$temporary" | sha256sum --check --status; then
+		printf '%s checksum mismatch after download.\n' "$description" >&2
+		rm -f "$temporary"
+		return 1
+	fi
+	mv -f "$temporary" "$destination"
+}
+
+mkdir -p "$SOURCE_ROOT"
+download_verified "$SOURCE_URL" "$ARCHIVE" "$SOURCE_SHA256" \
+	"official 0 A.D. Release 28 build source"
+
+SOURCE_MARKER="$SOURCE_DIR/.observer-source-ready"
+if [[ -d "$SOURCE_DIR" && ! -f "$SOURCE_MARKER" ]]; then
+	source_complete=1
+	for required in \
+		libraries/build-source-libs.sh \
+		libraries/source/spidermonkey/build.sh \
+		build/workspaces/update-workspaces.sh \
+		source/renderer/Renderer.cpp \
+		source/rlinterface/RLInterface.cpp; do
+		if [[ ! -f "$SOURCE_DIR/$required" ]]; then
+			source_complete=0
+			break
+		fi
+	done
+	if [[ "$source_complete" -eq 1 ]]; then
+		touch "$SOURCE_MARKER"
+	else
+		printf 'Removing an incomplete observer source extraction.\n'
+		rm -rf "$SOURCE_DIR"
+	fi
+fi
+if [[ ! -f "$SOURCE_MARKER" ]]; then
+	printf 'Extracting %s...\n' "$ARCHIVE_NAME"
+	extraction_root="$(mktemp -d "$SOURCE_ROOT/.extract.XXXXXX")"
+	if ! tar -xJf "$ARCHIVE" -C "$extraction_root"; then
+		rm -rf "$extraction_root"
+		exit 1
+	fi
+	mv "$extraction_root/0ad-0.28.0" "$SOURCE_DIR"
+	rmdir "$extraction_root"
+	touch "$SOURCE_MARKER"
+fi
+
+# Do not relink the executable while a server is running from this source tree.
+exec {observer_lock_fd}>"$SOURCE_DIR/binaries/.agent-observer.lock"
+if ! flock --nonblock "$observer_lock_fd"; then
+	printf 'The patched observer engine is running from %s; stop it before rebuilding.\n' \
+		"$SOURCE_DIR" >&2
+	exit 1
+fi
+
+migrate_cached_focus_observer() {
+	local interface_file="$1"
+	local interface_header="${interface_file%.cpp}.h"
+	local old_protocol='constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v2";'
+	local new_protocol='constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v3";'
+
+	# Some cached observer builds already contain the complete x/z focus
+	# implementation but still advertise v2. Only migrate that exact known
+	# shape; incomplete or otherwise modified sources keep the fail-closed path.
+	if [[ "$(grep --fixed-strings --count "$old_protocol" "$interface_file")" -ne 1 ]] ||
+		! grep --fixed-strings --quiet "ParseObserverCoordinate(" "$interface_file" ||
+		! grep --fixed-strings --quiet "hasFocus ? focusX" "$interface_file" ||
+		! grep --fixed-strings --quiet "hasFocus ? focusZ" "$interface_file" ||
+		! grep --fixed-strings --quiet "observerHasFocus" "$interface_header"; then
+		return 1
+	fi
+
+	sed -i 's/0ad-rl-observer-v2/0ad-rl-observer-v3/' "$interface_file"
+	grep --fixed-strings --quiet "$new_protocol" "$interface_file"
+}
+
+apply_engine_patch() {
+	local patch_file="$1"
+	local feature_file="$2"
+	local feature_marker="$3"
+	local patch_name
+	local patch_checksum
+	local stamp_file
+	local stamped_checksum=""
+	local compatible_stamp=0
+
+	patch_name="$(basename "$patch_file")"
+	patch_checksum="$(sha256sum "$patch_file" | cut -d ' ' -f 1)"
+	stamp_file="$SOURCE_DIR/.${patch_name}.sha256"
+	if [[ -f "$stamp_file" ]]; then
+		read -r stamped_checksum < "$stamp_file"
+		if [[ "$stamped_checksum" == "$patch_checksum" ]]; then
+			printf '%s is already applied.\n' "$patch_name"
+			return
+		fi
+		if [[ "$patch_name" == "0ad-v0.28.0-agent-observer.patch" &&
+			"$stamped_checksum" == "$LEGACY_FOCUS_OBSERVER_PATCH_SHA256" ]]; then
+			if grep --fixed-strings --quiet "$feature_marker" \
+				"$SOURCE_DIR/$feature_file" ||
+				migrate_cached_focus_observer "$SOURCE_DIR/$feature_file"; then
+				compatible_stamp=1
+				printf '%s\n' \
+					'Migrated cached observer protocol from v2 to focus-capable v3.'
+			fi
+		elif [[ "$patch_name" == "0ad-v0.28.0-step-batching.patch" &&
+			"$stamped_checksum" == "$LEGACY_STEP_BATCH_PATCH_SHA256" ]] &&
+			grep --fixed-strings --quiet "0ad-rl-observer-v3" \
+				"$SOURCE_DIR/$feature_file"; then
+			# The batched-step implementation is unchanged; only its observer
+			# protocol context moved from v2 to v3.
+			compatible_stamp=1
+		fi
+		if [[ "$compatible_stamp" -eq 1 ]] &&
+			grep --fixed-strings --quiet "$feature_marker" \
+			"$SOURCE_DIR/$feature_file"; then
+			printf '%s\n' "$patch_checksum" > "$stamp_file"
+			printf '%s is already applied; refreshed its patch stamp.\n' "$patch_name"
+			return
+		fi
+		printf 'Cached source has a different version of %s; remove %s and rebuild.\n' \
+			"$patch_name" "$SOURCE_DIR" >&2
+		exit 1
+	fi
+
+	if patch --batch --forward --directory "$SOURCE_DIR" --strip 1 \
+		--dry-run --silent < "$patch_file" >/dev/null 2>&1; then
+		patch --batch --forward --directory "$SOURCE_DIR" --strip 1 < "$patch_file"
+		printf '%s\n' "$patch_checksum" > "$stamp_file"
+	elif patch --batch --forward --directory "$SOURCE_DIR" --strip 1 \
+		--reverse --dry-run --silent < "$patch_file" >/dev/null 2>&1; then
+		printf '%s\n' "$patch_checksum" > "$stamp_file"
+		printf '%s is already applied.\n' "$patch_name"
+	elif grep --fixed-strings --quiet "$feature_marker" \
+		"$SOURCE_DIR/$feature_file"; then
+		# Migrate source trees patched by older versions of this builder. A later
+		# patch may have changed enough context that reverse dry-run no longer works.
+		printf '%s\n' "$patch_checksum" > "$stamp_file"
+		printf '%s is already applied.\n' "$patch_name"
+	else
+		printf '%s does not apply cleanly to %s\n' \
+			"$patch_name" "$SOURCE_DIR" >&2
+		exit 1
+	fi
+}
+
+apply_engine_patch "$PATCH_FILE" \
+	"source/rlinterface/RLInterface.cpp" "0ad-rl-observer-v3"
+apply_engine_patch "$THROUGHPUT_PATCH_FILE" \
+	"source/ps/GameSetup/GameSetup.cpp" "args.Has(\"rl-interface\")"
+apply_engine_patch "$STEP_BATCH_PATCH_FILE" \
+	"source/rlinterface/RLInterface.cpp" "MAX_BATCHED_TURNS"
+apply_engine_patch "$IDLE_WAIT_PATCH_FILE" \
+	"source/main.cpp" "SDL_Delay(1);"
+
+# Release 28 needs Python 3.11 for its bundled SpiderMonkey build. Reuse the
+# repository runtime installed by setup.sh when available.
+if [[ -x "$REPO_ROOT/.runtime/python/bin/python3" ]]; then
+	export PATH="$REPO_ROOT/.runtime/python/bin:$PATH"
+fi
+export CMAKE_FLAGS="${CMAKE_FLAGS:--DCMAKE_POLICY_VERSION_MINIMUM=3.5}"
+export CMAKE_POLICY_VERSION_MINIMUM="${CMAKE_POLICY_VERSION_MINIMUM:-3.5}"
+export BUILD_RELEASE_ONLY=1
+
+# Ubuntu installs LLVM tools with a version suffix. Mozilla's configure accepts
+# the explicit path, so use the first packaged llvm-objdump when no unversioned
+# command is available.
+if [[ -n "${LLVM_OBJDUMP:-}" ]]; then
+	if [[ ! -x "$LLVM_OBJDUMP" ]]; then
+		printf 'LLVM_OBJDUMP is not executable: %s\n' "$LLVM_OBJDUMP" >&2
+		exit 1
+	fi
+elif ! command -v llvm-objdump >/dev/null 2>&1; then
+	for candidate in /usr/bin/llvm-objdump-[0-9]*; do
+		if [[ -x "$candidate" ]]; then
+			export LLVM_OBJDUMP="$candidate"
+			break
+		fi
+	done
+	if [[ -z "${LLVM_OBJDUMP:-}" ]]; then
+		printf 'SpiderMonkey needs llvm-objdump; install the Ubuntu llvm package.\n' >&2
+		exit 1
+	fi
+fi
+
+# Keep the modern Rust toolchain required by SpiderMonkey inside the ignored
+# observer runtime. This does not modify the user's shell profile or system
+# packages, and the rustup bootstrap itself is versioned and checksummed.
+if [[ "$(uname -s)" != "Linux" || "$(uname -m)" != "x86_64" ]]; then
+	printf 'The repo-local observer toolchain currently supports Linux x86_64 only.\n' >&2
+	exit 1
+fi
+export RUSTUP_HOME="$RUNTIME_ROOT/toolchain/rustup"
+export CARGO_HOME="$RUNTIME_ROOT/toolchain/cargo"
+export PATH="$CARGO_HOME/bin:$PATH"
+if [[ ! -x "$CARGO_HOME/bin/rustup" ]]; then
+	download_verified \
+		"https://static.rust-lang.org/rustup/archive/$RUSTUP_VERSION/x86_64-unknown-linux-gnu/rustup-init" \
+		"$RUSTUP_INIT" "$RUSTUP_SHA256" "rustup-init $RUSTUP_VERSION"
+	chmod +x "$RUSTUP_INIT"
+	"$RUSTUP_INIT" -y --no-modify-path --profile minimal \
+		--default-toolchain "$RUST_TOOLCHAIN"
+fi
+rustc_version="$($CARGO_HOME/bin/rustc --version 2>/dev/null || true)"
+if [[ "$rustc_version" != "rustc $RUST_TOOLCHAIN "* ]]; then
+	"$CARGO_HOME/bin/rustup" toolchain install "$RUST_TOOLCHAIN" --profile minimal
+	"$CARGO_HOME/bin/rustup" default "$RUST_TOOLCHAIN"
+	rustc_version="$($CARGO_HOME/bin/rustc --version)"
+fi
+if [[ "$rustc_version" != "rustc $RUST_TOOLCHAIN "* ]]; then
+	printf 'Expected Rust %s, found: %s\n' "$RUST_TOOLCHAIN" "$rustc_version" >&2
+	exit 1
+fi
+cbindgen_version="$($CARGO_HOME/bin/cbindgen --version 2>/dev/null || true)"
+if [[ "$cbindgen_version" != "cbindgen 0.29.0" ]]; then
+	"$CARGO_HOME/bin/cargo" install --force --locked cbindgen@0.29.0
+fi
+
+missing_packages=()
+for command in cc g++ make tar curl patch m4 python3; do
+	if ! command -v "$command" >/dev/null 2>&1; then
+		case "$command" in
+			cc|g++) missing_packages+=(build-essential) ;;
+			make) missing_packages+=(build-essential) ;;
+			*) missing_packages+=("$command") ;;
+		esac
+	fi
+done
+if ! command -v cmake >/dev/null 2>&1; then
+	missing_packages+=(cmake)
+fi
+if ! command -v llvm-objdump >/dev/null 2>&1 && ! compgen -G '/usr/bin/llvm-objdump-[0-9]*' >/dev/null; then
+	missing_packages+=(llvm)
+fi
+if ! command -v pkg-config >/dev/null 2>&1; then
+	missing_packages+=(pkg-config)
+else
+	for dependency in \
+		"libenet:libenet-dev" \
+		"zlib:zlib1g-dev" \
+		"sdl2:libsdl2-dev" \
+		"libpng:libpng-dev" \
+		"libcurl:libcurl4-gnutls-dev" \
+		"libsodium:libsodium-dev" \
+		"freetype2:libfreetype-dev" \
+		"icu-i18n:libicu-dev" \
+		"icu-uc:libicu-dev" \
+		"libxml-2.0:libxml2-dev" \
+		"x11:libx11-dev"; do
+		if ! pkg-config --exists "${dependency%%:*}"; then
+			missing_packages+=("${dependency#*:}")
+		fi
+	done
+fi
+if ! printf '#include <fmt/printf.h>\n' | g++ -E -x c++ - >/dev/null 2>&1; then
+	missing_packages+=(libfmt-dev)
+fi
+if ! printf '#include <boost/random/linear_congruential.hpp>\n' | g++ -E -x c++ - >/dev/null 2>&1; then
+	missing_packages+=(libboost-dev)
+fi
+if ! printf '#include <uuid/uuid.h>\n' | cc -E - >/dev/null 2>&1; then
+	missing_packages+=(uuid-dev)
+fi
+if [[ "${#missing_packages[@]}" -gt 0 ]]; then
+	mapfile -t missing_packages < <(printf '%s\n' "${missing_packages[@]}" | sort -u)
+	printf 'Missing 0 A.D. build prerequisite(s). Install with: sudo apt install %s\n' \
+		"${missing_packages[*]}" >&2
+	exit 1
+fi
+
+printf 'Building bundled 0 A.D. dependencies (%s)...\n' "$JOBS"
+"$SOURCE_DIR/libraries/build-source-libs.sh" "$JOBS"
+"$SOURCE_DIR/build/workspaces/update-workspaces.sh" \
+	--without-atlas \
+	--without-audio \
+	--without-dap-interface \
+	--without-lobby \
+	--without-miniupnpc \
+	--without-tests
+make --directory "$SOURCE_DIR/build/workspaces/gcc" "$JOBS" config=release
+
+BINARY="$SOURCE_DIR/binaries/system/pyrogenesis"
+if [[ ! -x "$BINARY" ]]; then
+	printf 'Build finished without producing %s\n' "$BINARY" >&2
+	exit 1
+fi
+printf '\nPatched observer engine ready:\n  %s\n' "$BINARY"

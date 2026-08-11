@@ -1,0 +1,190 @@
+start {"mapType":"random","script":"rl_gather.js","gameSpeed":1,"settings":{"Name":"RL Gather","mapName":"RL Gather","mapType":"random","Script":"rl_gather.js","Seed":0,"AISeed":0,"Size":128,"CheatsEnabled":true,"VictoryConditions":[],"PlayerData":[{"Name":"Agent","Civ":"athenai","Color":{"r":20,"g":70,"b":150},"AI":"","Team":-1}]},"timestamp":1786413838,"engine_serialization_version":"0.28.0","mods":[{"mod":"public","name":"0ad","version":"0.28.0","ignoreInCompatibilityChecks":false},{"mod":"aoe3","name":"aoe3","version":"0.1.0","ignoreInCompatibilityChecks":false}]}
+turn 0 200
+cmd 1 {"type":"walk","entities":[150],"x":491.7449188232422,"z":221.04708862304688,"queued":false}
+end
+turn 1 200
+end
+turn 2 200
+end
+turn 3 200
+end
+turn 4 200
+end
+turn 5 200
+end
+turn 6 200
+end
+turn 7 200
+end
+turn 8 200
+end
+turn 9 200
+end
+turn 10 200
+cmd 1 {"type":"walk","entities":[150],"x":476.0728302001953,"z":226.62821578979492,"queued":false}
+end
+turn 11 200
+end
+turn 12 200
+end
+turn 13 200
+end
+turn 14 200
+end
+turn 15 200
+end
+turn 16 200
+end
+turn 17 200
+end
+turn 18 200
+end
+turn 19 200
+end
+turn 20 200
+cmd 1 {"type":"walk","entities":[150],"x":461.4098663330078,"z":231.5936622619629,"queued":false}
+end
+turn 21 200
+end
+turn 22 200
+end
+turn 23 200
+end
+turn 24 200
+end
+turn 25 200
+end
+turn 26 200
+end
+turn 27 200
+end
+turn 28 200
+end
+turn 29 200
+end
+turn 30 200
+cmd 1 {"type":"walk","entities":[150],"x":448.8519744873047,"z":235.66556930541992,"queued":false}
+end
+turn 31 200
+end
+turn 32 200
+end
+turn 33 200
+end
+turn 34 200
+end
+turn 35 200
+end
+turn 36 200
+end
+turn 37 200
+end
+turn 38 200
+end
+turn 39 200
+end
+turn 40 200
+cmd 1 {"type":"walk","entities":[150],"x":438.74583435058594,"z":238.80630683898926,"queued":false}
+end
+turn 41 200
+end
+turn 42 200
+end
+turn 43 200
+end
+turn 44 200
+end
+turn 45 200
+end
+turn 46 200
+end
+turn 47 200
+end
+turn 48 200
+end
+turn 49 200
+end
+turn 50 200
+cmd 1 {"type":"walk","entities":[150],"x":424.5505828857422,"z":243.0509204864502,"queued":false}
+end
+turn 51 200
+end
+turn 52 200
+end
+turn 53 200
+end
+turn 54 200
+end
+turn 55 200
+end
+turn 56 200
+end
+turn 57 200
+end
+turn 58 200
+end
+turn 59 200
+end
+turn 60 200
+cmd 1 {"type":"walk","entities":[150],"x":409.9609069824219,"z":247.09547805786133,"queued":false}
+end
+turn 61 200
+end
+turn 62 200
+end
+turn 63 200
+end
+turn 64 200
+end
+turn 65 200
+end
+turn 66 200
+end
+turn 67 200
+end
+turn 68 200
+end
+turn 69 200
+end
+turn 70 200
+cmd 1 {"type":"walk","entities":[150],"x":395.21580505371094,"z":250.8695192337036,"queued":false}
+end
+turn 71 200
+end
+turn 72 200
+end
+turn 73 200
+end
+turn 74 200
+end
+turn 75 200
+end
+turn 76 200
+end
+turn 77 200
+end
+turn 78 200
+end
+turn 79 200
+end
+turn 80 200
+cmd 1 {"type":"walk","entities":[150],"x":380.45923614501953,"z":254.30852234363556,"queued":false}
+end
+turn 81 200
+end
+turn 82 200
+end
+turn 83 200
+end
+turn 84 200
+end
+turn 85 200
+end
+turn 86 200
+end
+turn 87 200
+end
+turn 88 200
+end
+turn 89 200
+end

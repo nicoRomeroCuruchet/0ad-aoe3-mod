@@ -34,7 +34,75 @@ Or enable it from the in-game menu: **Settings → Mod Selection → aoe3**.
 
 Then start a match and select **Athenians** as your civilization.
 
+### Repo-local AppImage
+
+For a downloaded Linux AppImage, keep the large binary untracked at
+`.runtime/0ad/0ad.AppImage` and launch it through the repo wrapper:
+
+```bash
+./run_game.sh
+```
+
+The wrapper registers this checkout as the `aoe3` user mod and normalizes the
+0 A.D. data directory. This avoids Snap-launched terminals making the game look
+for mods under a Snap-specific `XDG_DATA_HOME`. On GNOME Wayland it also uses
+XWayland by default to avoid an invisible cursor in the Release 28 AppImage;
+set `OAD_SDL_VIDEODRIVER=wayland` to opt back into native Wayland.
+
 For full build-from-source instructions see [MANUAL.md](MANUAL.md).
+
+### Standard RL environment
+
+The reinforcement-learning code uses a reproducible repo-level Python environment. With
+[`uv`](https://docs.astral.sh/uv/) and `make` installed, one command creates `.venv/`, installs
+Python 3.11 when needed, and syncs the exact versions from `uv.lock`:
+
+```bash
+# If `uv` is not installed yet on Ubuntu:
+sudo apt install pipx
+pipx install uv
+export PATH="$HOME/.local/bin:$PATH"
+
+make setup
+```
+
+If you used the standalone `uv` installer from a VS Code Snap terminal and it
+installed under `~/snap/code/.../.local/bin`, run the `source .../env` command it
+prints, or just rerun `make setup`; the Makefile also searches that Snap path.
+
+Use the short, versioned project commands without activating the environment manually:
+
+```bash
+make help
+make test
+make oracle
+```
+
+The RL interface uses a small, versioned engine patch. Build it once, then start either the
+headless training server or the visual debug server:
+
+```bash
+make engine-observer
+make server       # headless, recommended for training
+make server-view  # rendered terrain and Player 1 line of sight
+```
+
+The builder downloads and verifies the official 0 A.D. Release 28 build source under the ignored
+`.runtime/` directory. The launcher reuses the art data from `.runtime/0ad/0ad.AppImage`, so it
+does not create another full copy of the public mod assets. On Ubuntu, install the native build
+helpers first with `sudo apt install build-essential cmake curl libboost-dev libboost-filesystem-dev libcurl4-gnutls-dev libenet-dev libfmt-dev libfreetype-dev libicu-dev libpng-dev libsdl2-dev libsodium-dev libx11-dev libxml2-dev llvm m4 patch pkg-config python3 uuid-dev xvfb zlib1g-dev`.
+Allow roughly 7 GB for the source, local Rust toolchain, and build products. This observer build
+omits audio, the lobby, and Atlas because it is intended only for local RL visualization.
+`make server` does not require an X11 display. If `make server-view` runs without one, the
+launcher uses `xvfb-run` automatically when `xvfb` is installed; otherwise install it with
+`sudo apt install xvfb`.
+
+The Makefile is only a thin interface: `make setup` runs `uv sync --locked`, and the other
+targets run their Python tools through `uv run`. For an interactive terminal, you can instead
+run `source .venv/bin/activate` once and then use `python`, `pytest`, and `ruff` directly.
+
+See [rl/README.md](rl/README.md) for the live 0 A.D. server, training, evaluation, and custom
+agent workflow.
 
 ---
 
@@ -85,6 +153,7 @@ Hoplites charge in phalanx (Othismos x2-3 damage)
 aoe3/
 ├── README.md              # This file
 ├── MANUAL.md              # Detailed setup + mechanics reference
+├── engine/                # Versioned Release 28 observer patch + build helper
 ├── mod.json               # Mod metadata
 ├── simulation/            # Game logic
 │   ├── components/        # Custom JS components (HoplitePhalanx, Stamina)
