@@ -78,6 +78,7 @@ class SharedVillagerActorCriticPolicy(ActorCriticPolicy):
         self,
         *args: Any,
         hidden_dim: int = 64,
+        click_log_std_init: float | None = None,
         m1_checkpoint: Any = None,
         **kwargs: Any,
     ) -> None:
@@ -87,6 +88,7 @@ class SharedVillagerActorCriticPolicy(ActorCriticPolicy):
         # weights with M1's on every resume.
         del m1_checkpoint
         self.hidden_dim = hidden_dim
+        self.click_log_std_init = click_log_std_init
         super().__init__(*args, **kwargs)
 
     def _villager_shape(self) -> tuple[int, int]:
@@ -112,11 +114,30 @@ class SharedVillagerActorCriticPolicy(ActorCriticPolicy):
         # shared head. SB3's own action_net would mix villagers back together
         # and destroy the weight sharing, so it is removed.
         self.action_net = nn.Identity()
+        self._apply_click_log_std_init()
         self.optimizer = self.optimizer_class(
             self.parameters(),
             lr=lr_schedule(1),
             **self.optimizer_kwargs,
         )
+
+    def _apply_click_log_std_init(self) -> None:
+        """Give the click bit its own exploration spread.
+
+        The two position values address the whole map, so a spread wide enough to
+        explore the click decision is hundreds of metres of aiming noise, and a
+        spread tight enough to hit a tree freezes the click bit at whatever sign
+        it starts with. They need different scales, so the click dimension of
+        every villager is set separately from ``log_std_init``.
+        """
+
+        if self.click_log_std_init is None:
+            return
+        villager_count = self._villager_shape()[0]
+        with torch.no_grad():
+            for villager in range(villager_count):
+                click = ACTION_VALUES_PER_VILLAGER * villager + 2
+                self.log_std[click] = self.click_log_std_init
 
 
 class M1TransferError(ValueError):
@@ -172,5 +193,7 @@ def initialize_from_m1(
         target_trunk[2].bias.copy_(source_trunk[2].bias)
         extractor.villager_head.weight.copy_(source.action_net.weight)
         extractor.villager_head.bias.copy_(source.action_net.bias)
-        # One villager's exploration spread, repeated for every villager.
-        policy.log_std.copy_(source.log_std.repeat(extractor.villager_count))
+    # M1's exploration spread is deliberately left behind. Its std stayed near
+    # 1.0, which on this action space is +-220 m of noise on every click, and
+    # copying it here silently overrode whatever log_std_init the config asked
+    # for -- destroying the very skill this transfer exists to preserve.

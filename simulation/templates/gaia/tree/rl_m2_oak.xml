@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Entity parent="gaia/tree/oak">
+  <Identity>
+    <GenericName>M2 Oak</GenericName>
+  </Identity>
+  <ResourceSupply>
+    <!-- Six trees × 100 wood = the M2 collective completion objective. -->
+    <Max>100</Max>
+    <!-- Assignment is a physical coordination problem, not a quota: one
+         villager works each tree while teammates choose other live trees. -->
+    <MaxGatherers>1</MaxGatherers>
+  </ResourceSupply>
+</Entity>

@@ -75,6 +75,7 @@ def _build_team_oracle(agent: AgentSpec, env: Any, seed: int) -> Policy:
     return TeamGatherOraclePolicy(
         villager_count=villager_count,
         resource_count=resource_count,
+        action_mode=str(getattr(env, "action_mode", "raw_click")),
     )
 
 

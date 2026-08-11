@@ -1,10 +1,10 @@
-# RL Gather — Milestones 0 y 1
+# RL Gather — Milestones 0, 1 y 2
 
 Primer experimento de Reinforcement Learning sobre el mod: **SAC entrena 1 aldeano (Polites)
 para ir a 1 recurso**, usando la interfaz RL nativa de 0 A.D. (`--rl-interface`) + el cliente
 `zero_ad`, envuelto en un `gymnasium.Env`.
 
-**Estado: M0 cumplido y M1 implementado.** M0 valida navegación con reward por acercamiento.
+**Estado: M0 y M1 cumplidos; M2 usa un controlador conjunto de asignación.** M0 valida navegación con reward por acercamiento.
 M1 reutiliza la misma arquitectura modular y la misma vista de política, pero cambia el entorno
 a reward por **Δstock real** usando acción `[target_x, target_z, click_signal]`.
 Si `click_signal` está activo y el target cae sobre el árbol, el env emite un comando `gather`.
@@ -15,6 +15,36 @@ El entorno lee el stock de madera con `game.evaluate(...)` y recompensa la mader
 efectivamente depositada. M1 suma shaping opcional por acercarse, entrar en rango de
 recolección, empezar a cargar madera, no clicar mientras UnitAI completa el ciclo útil, y
 penalizar clicks que interrumpen ese ciclo.
+
+M2 escala a 4 aldeanos y 6 robles dedicados. Cada roble tiene 100 de madera y admite sólo un
+recolector; los seis se ubican a 60° entre sí en un anillo centrado en la cabaña. En cada reset
+un seed reproducible rota el anillo completo, de modo que la política no puede memorizar una
+dirección absoluta. El objetivo es **`Δstock colectivo >= 600`** dentro del horizonte: hay que
+vaciar y entregar los seis árboles en dos oleadas. No hay cuota por aldeano.
+
+La acción de M2 es una sola categoría global `Discrete(1045)`. Cada categoría representa un
+matching parcial de los cuatro aldeanos: para cada uno, `NO_CLICK` o `TREE_j`, con la restricción
+de que dos aldeanos nunca elijan el mismo árbol en la misma decisión. Un adaptador determinista
+convierte esa asignación en los cuatro `[x, z, click]` exactos que ya entiende el entorno; por lo
+tanto PPO aprende **qué reparto mandar a los aldeanos libres**, no la identidad
+`coordenada_del_árbol → misma_coordenada_del_click`, ni recibe una acción semántica `gather`.
+El ejecutor local usa estado ya observado para reservar el árbol que alguien corta e invalidar
+elecciones de árboles agotados; `NO_CLICK` mientras UnitAI corta o transporta sigue siendo una
+decisión aprendida, porque un click alternativo puede interrumpirlo. Eso evita comandos
+físicamente imposibles sin entregar una asignación oculta a la red.
+El actor puntúa el matching completo y el crítico ve el equipo completo. Las observaciones siguen
+incluyendo las posiciones relativas y la madera restante de todos los árboles: M2 no es
+exploración. La rotación aleatoria prueba coordinación sobre orientaciones nuevas, no percepción
+bajo niebla de guerra.
+
+Al evaluar o renderizar de forma determinista, el categórico primero suma la probabilidad de cada
+patrón binario de quién hace click y luego elige el matching más probable dentro de ese patrón.
+Así el único label `NO_CLICK` global no gana artificialmente frente a muchos matchings productivos
+equivalentes. El muestreo, la entropía y los log-probs de PPO siguen siendo el categórico nativo.
+
+Los checkpoints y videos M2 anteriores al anillo de 6×100 y a `Discrete(1045)` son **artefactos
+legacy**: usaban el objetivo `+80` y un espacio de acción distinto, por lo que no son comparables
+ni compatibles con el benchmark vigente.
 
 ## Cómo correr todo (paso a paso)
 
@@ -71,7 +101,14 @@ make m1-oracle EPISODES=1 ARGS="--mode deterministic --delay 0.5 --agent-view --
 ```
 
 En M1, `--verbose` también imprime `stock` y `dstock` cuando la madera entra al stock del
-jugador. Para evaluar un modelo aprendido, indicá su experimento y checkpoint:
+jugador. Para comprobar M2 con el oracle de asignación:
+
+```bash
+.venv/bin/python -m rl.eval --experiment rl/configs/m2_oracle.toml \
+  --episodes 1 --mode deterministic --agent-view --verbose
+```
+
+Para evaluar un modelo aprendido, indicá su experimento y checkpoint:
 
 ```bash
 make eval MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
@@ -79,6 +116,9 @@ make eval MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
 # o para un checkpoint entrenado con M1:
 make m1-eval MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
   TRUST_MODEL=1 ARGS="--mode both"
+# M2 (PPO categórico):
+.venv/bin/python -m rl.eval --experiment rl/configs/m2_sb3_ppo.toml \
+  --model rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model --trust-model --mode both
 ```
 
 Reemplazá `REEMPLAZAR_CON_LA_CORRIDA` por el directorio exacto que imprime `rl.train`;
@@ -87,20 +127,25 @@ no copies los caracteres `<` y `>` en un comando de shell.
 > Los checkpoints de SB3 pueden contener objetos Python serializados. Cargá sólo modelos que
 > generaste vos o cuya fuente confiás; `--trust-model` hace explícita esa decisión.
 
-`--agent-view` abre una segunda ventana centrada en el Polites. La imagen viene directamente del
-renderer de 0 A.D.: muestra el terreno, los modelos, las animaciones y la niebla de guerra que ve
-el Player 1, usando el rango vivo del componente `Vision` del aldeano. No mueve la cámara principal.
+`--agent-view` abre una segunda ventana del observer. En M0/M1 se centra en el Polites y usa su
+rango vivo de `Vision`; en M2 calcula una caja alrededor de los cuatro aldeanos, los árboles y el
+depósito, y centra/ensancha una única cámara para mostrar el equipo completo. La imagen viene
+directamente del renderer de 0 A.D.: muestra terreno, modelos, animaciones y la niebla de guerra
+real del Player 1. No mueve la cámara principal.
 Debajo de la imagen se conserva el input normalizado que recibe la política. M0 usa cinco
 valores geométricos; M1 agrega `carried_wood_norm` y `stock_wood_norm` para que la política pueda
 distinguir cuándo conviene dejar correr UnitAI. La advertencia explícita sigue siendo válida:
-M0/M1 todavía entregan las coordenadas globales del árbol aunque esté fuera de la visión física.
+M0/M1 todavía entregan las coordenadas globales del árbol aunque esté fuera de la visión física;
+M2 entrega las posiciones relativas y cantidades de todos los árboles. Sus slots quedan estables
+durante el episodio: cuando un roble se agota y desaparece del engine, conserva su slot con
+cantidad cero para que ni la observación ni el significado de las 1045 acciones cambien.
 Esos píxeles son sólo para depuración; la política no los consume.
 
 La primera compilación con `make engine-observer` tarda, ocupa aproximadamente 7 GB y queda en
 `.runtime/0ad-observer/`. En Ubuntu, instalá primero:
 
 ```bash
-sudo apt install build-essential cmake curl libboost-dev libboost-filesystem-dev \
+sudo apt install build-essential cmake curl libboost-dev \
   libcurl4-gnutls-dev libenet-dev libfmt-dev libfreetype-dev libicu-dev \
   libpng-dev libsdl2-dev libsodium-dev libx11-dev libxml2-dev llvm m4 \
   patch pkg-config python3 uuid-dev xvfb zlib1g-dev
@@ -117,7 +162,7 @@ Opciones de `rl.eval`:
 |------|----------|
 | `--mode configured\|stochastic\|deterministic\|both` | por defecto respeta `evaluation.deterministic`; `both` compara ambos modos |
 | `--delay 0.5` | pausa (seg) entre decisiones; con `--agent-view`, pausa antes de ejecutar la acción |
-| `--agent-view` | abre el render real del LOS del Polites y audita aparte el input omnisciente de la política |
+| `--agent-view` | abre el render real del LOS; M2 encuadra al equipo completo y audita aparte el input de la política |
 | `--verbose` | imprime paso a paso (observación, target, distancia, stock si existe, reward) |
 | `--episodes N` | cuántos episodios correr (la config fija usa 1 para oracle, 10 para random y 20 para SAC) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
@@ -138,6 +183,9 @@ make m1-train
 # Mismo criterio de parada, algoritmo on-policy:
 make ppo-train
 make m1-ppo-train
+# M2 usa PPO: SAC de SB3 sólo acepta acciones continuas Box, mientras que M2
+# elige un matching global Discrete(1045).
+.venv/bin/python -m rl.train --experiment rl/configs/m2_sb3_ppo.toml
 ```
 
 `sb3_ppo` usa exactamente el mismo entorno, seeds, criterio de parada y evaluación final
@@ -146,17 +194,20 @@ replay buffer, así que su checkpoint es sólo `model.zip` + manifiesto). Eso ha
 corridas sean comparables paso a paso.
 
 Las configs de entrenamiento no dependen sólo de un número fijo de pasos: **el criterio de parada es
-completar la tarea**. El agente (SAC o PPO) entrena por tramos y, después de
-cada tramo elegible, pausa el aprendizaje para evaluar la política determinista sobre 20 episodios
-con seeds fijas. Se detiene cuando al menos 80% terminan por éxito real del entorno. Una truncación
-sin terminación exitosa —por horizonte o una interrupción del backend— cuenta como fallo; si el
-objetivo se alcanza exactamente en el último paso, la terminación exitosa sí cuenta. El reward de
-shaping no puede activar este criterio. M0 chequea cada 1.250 pasos, exige al menos 1.000 pasos de
-vida del modelo y tiene un tope de seguridad de 50.000. M1 chequea cada 2.500, exige 2.500 y tiene
-un tope de 500.000. Esos tres números son idénticos en las configs SAC y PPO del mismo milestone.
-Al terminar, ambos vuelven a correr la evaluación determinista de 20 episodios
-que queda guardada en `metrics.json`. El escenario actual tiene `Seed=0` y no usa RNG: esos 20
-episodios comprueban repetibilidad y estabilidad del backend, no diversidad de mapas.
+completar la tarea**. El agente entrena por tramos y, después de cada tramo elegible, pausa el
+aprendizaje para evaluar la política determinista. Una truncación sin terminación exitosa —por
+horizonte o una interrupción del backend— cuenta como fallo; si el objetivo se alcanza exactamente
+en el último paso, la terminación exitosa sí cuenta. El reward de shaping no puede activar este
+criterio. M0/M1 exigen al menos 80% de éxito en 20 episodios; M0 chequea cada 1.250 pasos, exige al
+menos 1.000 pasos de vida del modelo y tiene un tope de seguridad de 50.000. M1 chequea cada 2.500,
+exige 2.500 y tiene un tope de 500.000. M2 evalúa después de su primer rollout de 512 decisiones y
+exige al menos 95% en 20 orientaciones rotadas retenidas: así se selecciona por éxito real
+generalizado, no por el reward estocástico de entrenamiento. Al terminar, ambos vuelven a correr la
+evaluación determinista configurada y la guardan en
+`metrics.json`. M0/M1 usan escenarios fijos; M2 inyecta en cada reset un seed reproducible que
+rota su anillo de árboles. Así, las seeds de evaluación constituyen un conjunto de orientaciones
+retenidas y no la repetición de un único mapa. La posición de los árboles sigue siendo observable:
+esto mide asignación y ejecución, no generalización visual ni exploración.
 
 `STEPS=N` reemplaza sólo ese tope para una corrida de diagnóstico; no desactiva el criterio de
 éxito. Al reanudar, los pasos mínimos usan el contador acumulado del modelo y la política debe
@@ -240,11 +291,15 @@ Con `--mode both --verbose`:
 | `agents/registry.py` | Registro explícito de implementaciones y capacidades |
 | `agents/baselines.py` | Políticas random y oracle para validar/comparar |
 | `agents/sb3.py` | Adaptadores de SAC y PPO de Stable-Baselines3; import opcional y tardío |
+| `agents/assignment_policy.py` | Actor/crítico M2 estructurado: puntúa matchings globales válidos y usa un categórico de 1045 acciones |
 | `agents/custom/` | Lugar de las implementaciones de los alumnos |
 | `experiments/` | Config TOML, construcción, entrenamiento, evaluación y artefactos comunes |
-| `configs/` | Experimentos versionados y comparables (`m0_*.toml`, `m1_*.toml`) |
+| `configs/` | Experimentos versionados y comparables (`m0_*.toml`, `m1_*.toml`, `m2_*.toml`) |
 | `gather/core.py` | Funciones puras (geometría, normalización, observación, rewards) — con tests |
 | `gather/env.py` | `ZeroADGatherEnv(gymnasium.Env)` sobre `zero_ad`, con backend inyectable |
+| `gather/team_env.py` | M2: estado conjunto, anillo rotado por seed, slots seguros ante agotamiento y reward colectivo |
+| `gather/assignment_actions.py` | Enumera los 1045 matchings sin colisiones y los traduce a clicks de mapa |
+| `gather/team_render.py` | Fallback top-down que encuadra al equipo completo sin un POV único |
 | `gather/agent_view.py` | Ventana debug opcional con el frame real producido por el engine |
 | `gather/engine_observer.py` | Cliente y validación del endpoint de frames PPM del engine |
 | `train.py`, `eval.py` | CLIs finas: parsean opciones y delegan a los módulos anteriores |
@@ -270,8 +325,11 @@ El mapa determinista (1 Polites + 1 árbol + 1 storehouse) está en
 - **M1** — Acción = `[target_x, target_z, click_signal]`; click cerca del árbol emite `gather`,
   no-click deja correr UnitAI; reward = Δstock real en vez de acercamiento. ✓ El env puede
   reintentar/reconectar y trunca de forma limpia un episodio interrumpido.
-- **M2** — 4 aldeanos + varios recursos. Acción `Box(8,)` (un punto por aldeano), reward = Δstock
-  colectivo. Sigue con posiciones **conocidas** (observación incluye los recursos).
+- **M2** — 4 aldeanos + 6 robles de 100, con un recolector máximo por roble. Un solo
+  `Discrete(1045)` elige un matching parcial `NO_CLICK | TREE_0 | ... | TREE_5` sin colisiones;
+  el entorno lo ejecuta como clicks normales de mapa. El anillo equiangular alrededor de la
+  cabaña se rota por seed y se resuelve sólo al entregar `Δstock colectivo >= 600`, sin cuotas
+  individuales. Las posiciones de recursos son conocidas: sigue siendo coordinación, no M3.
 - **M3+ (idea futura) — Exploración con niebla de guerra.** Un salto de dificultad: el agente
   **no** conoce dónde están los recursos y tiene que **explorar para encontrarlos**.
   Implica:
@@ -342,7 +400,8 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 
 1. **Arrancá corriendo lo que ya está** (sección "Cómo correr todo"): mirá al agente de M0 ir al recurso.
 2. **M1** — corré `make m1-oracle` y `make m1-train`: ahora el reward es Δstock real.
-3. **M2** — escalá a 4 aldeanos + varios recursos (acción `Box(8,)`). Sigue con posiciones conocidas.
+3. **M2** — coordiná 4 aldeanos sobre 6 robles exclusivos mediante un matching global de 1045
+   opciones. El anillo se rota por seed; las posiciones siguen siendo conocidas.
 4. **M3+ (capstone)** — exploración con niebla de guerra. Ambicioso; encaralo al final.
 
 ### Dónde meter mano (enganches concretos)

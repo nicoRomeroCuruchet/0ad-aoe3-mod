@@ -13,7 +13,7 @@ override export TRUST_MODEL := $(value TRUST_MODEL)
 
 .DEFAULT_GOAL := help
 
-.PHONY: help setup test lint verify engine-observer server server-view oracle random train eval m1-oracle m1-random m1-train m1-eval
+.PHONY: help setup test lint verify engine-observer server server-view oracle random train ppo-train eval m1-oracle m1-random m1-train m1-ppo-train m1-eval
 
 help:
 	@printf '%s\n' \
@@ -28,9 +28,11 @@ help:
 		'  make oracle [EPISODES=…] [ARGS=…]  Evaluate the oracle baseline' \
 		'  make random [EPISODES=…] [ARGS=…]  Evaluate the random baseline' \
 		'  make train [STEPS=…] [MODEL=… TRUST_MODEL=1] [ARGS=…]  Train/resume SAC' \
+		'  make ppo-train [STEPS=…] [MODEL=… TRUST_MODEL=1] [ARGS=…]  Train/resume PPO' \
 		'  make eval MODEL=… TRUST_MODEL=1    Evaluate a trusted SAC checkpoint' \
 		'  make m1-oracle [EPISODES=…]        Evaluate M1 stock-reward oracle' \
 		'  make m1-train [STEPS=…] [MODEL=… TRUST_MODEL=1] [ARGS="--log-interval 1"]  Train/resume SAC on M1 stock reward' \
+		'  make m1-ppo-train [STEPS=…] [MODEL=… TRUST_MODEL=1]  Train/resume PPO on M1 stock reward' \
 		'  make m1-eval MODEL=… TRUST_MODEL=1 Evaluate an M1 checkpoint'
 
 setup:
@@ -104,6 +106,26 @@ train:
 	"$(UV)" run --locked python -m rl.train --experiment rl/configs/m0_sb3_sac.toml \
 		"$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
 
+ppo-train:
+	@steps="$${STEPS:-}"; \
+	model="$${MODEL:-}"; \
+	trust_model="$${TRUST_MODEL:-}"; \
+	if [[ -n "$$steps" && ! "$$steps" =~ ^[1-9][0-9]*$$ ]]; then \
+		printf '%s\n' 'STEPS must be a positive integer.' >&2; exit 2; \
+	fi; \
+	if [[ -n "$$model" && "$$trust_model" != "1" ]]; then \
+		printf '%s\n' 'Refusing to deserialize the checkpoint without explicit TRUST_MODEL=1.' >&2; \
+		exit 2; \
+	fi; \
+	read -r -a extra_args <<< "$${ARGS:-}"; \
+	step_args=(); \
+	if [[ -n "$$steps" ]]; then step_args=(--timesteps "$$steps"); fi; \
+	resume_args=(); \
+	if [[ -n "$$model" ]]; then resume_args=(--resume-from "$$model" --trust-model); fi; \
+	$(UV_REQUIRED); \
+	"$(UV)" run --locked python -m rl.train --experiment rl/configs/m0_sb3_ppo.toml \
+		"$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
+
 eval:
 	@model="$${MODEL:-}"; \
 	trust_model="$${TRUST_MODEL:-}"; \
@@ -168,6 +190,26 @@ m1-train:
 	if [[ -n "$$model" ]]; then resume_args=(--resume-from "$$model" --trust-model); fi; \
 	$(UV_REQUIRED); \
 	"$(UV)" run --locked python -m rl.train --experiment rl/configs/m1_sb3_sac.toml \
+		"$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
+
+m1-ppo-train:
+	@steps="$${STEPS:-}"; \
+	model="$${MODEL:-}"; \
+	trust_model="$${TRUST_MODEL:-}"; \
+	if [[ -n "$$steps" && ! "$$steps" =~ ^[1-9][0-9]*$$ ]]; then \
+		printf '%s\n' 'STEPS must be a positive integer.' >&2; exit 2; \
+	fi; \
+	if [[ -n "$$model" && "$$trust_model" != "1" ]]; then \
+		printf '%s\n' 'Refusing to deserialize the checkpoint without explicit TRUST_MODEL=1.' >&2; \
+		exit 2; \
+	fi; \
+	read -r -a extra_args <<< "$${ARGS:-}"; \
+	step_args=(); \
+	if [[ -n "$$steps" ]]; then step_args=(--timesteps "$$steps"); fi; \
+	resume_args=(); \
+	if [[ -n "$$model" ]]; then resume_args=(--resume-from "$$model" --trust-model); fi; \
+	$(UV_REQUIRED); \
+	"$(UV)" run --locked python -m rl.train --experiment rl/configs/m1_sb3_ppo.toml \
 		"$${step_args[@]}" "$${resume_args[@]}" "$${extra_args[@]}"
 
 m1-eval:

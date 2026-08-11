@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from gymnasium import spaces
 
 from rl.agents.base import AgentSpec, Policy, TrainRequest
 from rl.agents.sb3 import (
@@ -40,6 +41,16 @@ class FakeModel:
     def save_replay_buffer(self, path):
         self.replay_buffer_saved_to = path
         Path(path).write_bytes(f"replay:{self.num_timesteps}".encode())
+
+
+class FakeMultiDiscreteModel:
+    def __init__(self):
+        self.action_space = spaces.MultiDiscrete([3, 4])
+        self.predict_calls = []
+
+    def predict(self, observation, *, deterministic):
+        self.predict_calls.append((observation, deterministic))
+        return np.array([1, 3], dtype=np.int64), None
 
 
 class FakeSAC:
@@ -127,6 +138,19 @@ def test_sb3_policy_adapts_predict_to_the_common_policy_contract(tmp_path: Path)
     assert manifest["num_timesteps"] == 7
     assert manifest["model_sha256"] == sha256(b"model:7").hexdigest()
     assert manifest["replay_buffer_sha256"] == sha256(b"replay:7").hexdigest()
+
+
+def test_sb3_policy_preserves_multidiscrete_action_dtype():
+    model = FakeMultiDiscreteModel()
+    policy = SB3Policy(model)
+    observation = np.array([1.0, 2.0], dtype=np.float32)
+
+    action = policy.act(observation, deterministic=False)
+
+    np.testing.assert_array_equal(action, np.array([1, 3], dtype=np.int64))
+    assert action.dtype == model.action_space.dtype
+    assert model.action_space.contains(action)
+    assert model.predict_calls == [(observation, False)]
 
 
 @pytest.mark.parametrize(

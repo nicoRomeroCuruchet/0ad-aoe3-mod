@@ -9,7 +9,8 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 
-ENGINE_OBSERVER_PROTOCOL = "0ad-rl-observer-v1"
+ENGINE_OBSERVER_PROTOCOL = "0ad-rl-observer-v3"
+MAX_VIEW_RANGE_M = 512.0
 MAX_FRAME_DIMENSION = 512
 MAX_FRAME_BYTES = MAX_FRAME_DIMENSION * MAX_FRAME_DIMENSION * 3 + 64
 
@@ -143,8 +144,19 @@ class EngineObserverClient:
                 "the engine observer protocol does not match this RL client"
             )
 
-    def capture(self, entity_id: int) -> EngineObserverFrame:
-        """Request the Player-1 LOS render centered on one owned entity."""
+    def capture(
+        self,
+        entity_id: int,
+        view_range_m: float | None = None,
+        focus_xz: tuple[float, float] | None = None,
+    ) -> EngineObserverFrame:
+        """Request the Player-1 LOS render centered on one owned entity.
+
+        ``view_range_m`` overrides the view half-width in metres; ``None``
+        keeps the entity's own vision range, which is the per-agent view.
+        ``focus_xz`` recentres the camera on a map point while the entity
+        keeps selecting whose line of sight is rendered.
+        """
 
         if (
             isinstance(entity_id, bool)
@@ -152,7 +164,23 @@ class EngineObserverClient:
             or not 0 < entity_id < 2**32
         ):
             raise ValueError("observer entity ID must be a positive integer")
-        query = urlencode({"entity": entity_id})
+        parameters: dict[str, Any] = {"entity": entity_id}
+        if view_range_m is not None:
+            range_value = float(view_range_m)
+            if not 0.0 < range_value <= MAX_VIEW_RANGE_M:
+                raise ValueError(
+                    f"observer view range must be in (0, {MAX_VIEW_RANGE_M}] metres"
+                )
+            parameters["range"] = f"{range_value:.3f}"
+        if focus_xz is not None:
+            x, z = (float(focus_xz[0]), float(focus_xz[1]))
+            for name, value in (("x", x), ("z", z)):
+                if not 0.0 <= value <= 4096.0:
+                    raise ValueError(
+                        f"observer focus {name} must be in [0, 4096] metres"
+                    )
+                parameters[name] = f"{value:.3f}"
+        query = urlencode(parameters)
         payload, content_type = self._read(
             f"observe?{query}",
             accept="image/x-portable-pixmap",

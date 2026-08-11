@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Callable
 
@@ -9,6 +10,16 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 
+from .assignment_actions import (
+    ACTION_MODES,
+    ASSIGNMENT_CLICK_MODE,
+    JOINT_ASSIGNMENT_CLICK_MODE,
+    RAW_CLICK_MODE,
+    assignment_action_space,
+    assignment_to_raw_click,
+    joint_assignment_action_space,
+    joint_assignment_from_index,
+)
 from .core import denormalize_action, distance, is_reached, nearest_index, xz
 from .engine_observer import EngineObserverClient, EngineObserverUnavailable
 from .env import (
@@ -27,7 +38,8 @@ from .observation import (
     team_observation_labels,
 )
 from .reward import TeamRewardScales, VillagerRewardInputs, compose_team_reward
-from .roster import Roster, build_roster
+from .roster import Roster, build_roster, refresh_roster
+from .team_render import TeamRenderState, render_team_observer_frame
 
 
 class ZeroADTeamGatherEnv(gym.Env):
@@ -41,6 +53,8 @@ class ZeroADTeamGatherEnv(gym.Env):
         *,
         villager_count: int = 4,
         resource_count: int = 4,
+        action_mode: str = RAW_CLICK_MODE,
+        randomize_layout: bool = False,
         uri: str = "http://localhost:6000",
         map_size_m: float = 512.0,
         horizon: int = 120,
@@ -50,16 +64,18 @@ class ZeroADTeamGatherEnv(gym.Env):
         stock_resource: str = "wood",
         stock_player: int = 1,
         stock_success_threshold: float = 80.0,
-        min_delivery_per_villager: float = 0.0,
         carried_resource_observation_scale: float = 20.0,
         stock_observation_scale: float = 1000.0,
         resource_amount_scale: float = 200.0,
         distance_shaping_scale: float = 0.02,
         carried_resource_delta_reward_scale: float = 0.2,
         click_gather_cycle_penalty: float = 1.0,
+        carrying_no_click_reward: float = 0.0,
         backend_retries: int = 0,
         backend_retry_delay: float = 1.0,
         save_replay: bool = False,
+        observer_view: str = "team",
+        observer_view_margin_m: float = 12.0,
         observer_villager_slot: int = 0,
         game: Any = None,
         actions: Any = None,
@@ -70,10 +86,23 @@ class ZeroADTeamGatherEnv(gym.Env):
         super().__init__()
         if villager_count <= 0 or resource_count <= 0:
             raise ValueError("villager_count and resource_count must be positive")
+        if action_mode not in ACTION_MODES:
+            raise ValueError(
+                "action_mode must be 'raw_click', 'assignment_click', or "
+                "'joint_assignment_click'"
+            )
+        if not isinstance(randomize_layout, bool):
+            raise ValueError("randomize_layout must be a boolean")
         if not 0 <= observer_villager_slot < villager_count:
             raise ValueError("observer_villager_slot must address a configured villager")
+        if observer_view not in {"team", "villager"}:
+            raise ValueError("observer_view must be 'team' or 'villager'")
+        if not observer_view_margin_m >= 0.0:
+            raise ValueError("observer_view_margin_m must be non-negative")
         if sim_frame_observer is not None and not callable(sim_frame_observer):
             raise ValueError("sim_frame_observer must be callable or None")
+        self.observer_view = observer_view
+        self.observer_view_margin_m = observer_view_margin_m
         self.observer_villager_slot = observer_villager_slot
         self.sim_frame_observer = sim_frame_observer
         self.uri = uri
@@ -84,9 +113,28 @@ class ZeroADTeamGatherEnv(gym.Env):
             engine_observer if engine_observer is not None else EngineObserverClient(uri)
         )
         self.scenario_config = scenario_config
+        self.randomize_layout = randomize_layout
+        self._scenario_template: dict[str, Any] | None = None
+        if randomize_layout:
+            try:
+                parsed_scenario = json.loads(scenario_config)
+            except (TypeError, json.JSONDecodeError) as error:
+                raise ValueError(
+                    "randomize_layout requires a JSON scenario configuration"
+                ) from error
+            if (
+                not isinstance(parsed_scenario, dict)
+                or not isinstance(parsed_scenario.get("settings"), dict)
+            ):
+                raise ValueError(
+                    "randomize_layout requires scenario settings as an object"
+                )
+            self._scenario_template = parsed_scenario
+        self._layout_seed: int | None = None
         self.save_replay = save_replay
         self.villager_count = villager_count
         self.resource_count = resource_count
+        self.action_mode = action_mode
         self.map_size_m = map_size_m
         self.horizon = horizon
         self.sim_steps_per_action = sim_steps_per_action
@@ -95,10 +143,6 @@ class ZeroADTeamGatherEnv(gym.Env):
         self.stock_resource = stock_resource
         self.stock_player = stock_player
         self.stock_success_threshold = stock_success_threshold
-        # A total-wood threshold alone is satisfiable by one villager making
-        # several trips, which is not a team task. Requiring a per-villager
-        # delivery makes participation part of the success criterion.
-        self.min_delivery_per_villager = min_delivery_per_villager
         self.backend_retries = backend_retries
         self.backend_retry_delay = backend_retry_delay
         self.observation_scales = TeamObservationScales(
@@ -111,6 +155,7 @@ class ZeroADTeamGatherEnv(gym.Env):
             distance_shaping_scale=distance_shaping_scale,
             carried_resource_delta_reward_scale=carried_resource_delta_reward_scale,
             click_gather_cycle_penalty=click_gather_cycle_penalty,
+            carrying_no_click_reward=carrying_no_click_reward,
         )
         self.observation_labels = team_observation_labels(
             villager_count,
@@ -122,19 +167,30 @@ class ZeroADTeamGatherEnv(gym.Env):
             shape=(villager_count, len(self.observation_labels)),
             dtype=np.float32,
         )
-        self.action_space = spaces.Box(
-            -1.0,
-            1.0,
-            shape=(3 * villager_count,),
-            dtype=np.float32,
-        )
+        if action_mode == ASSIGNMENT_CLICK_MODE:
+            self.action_space = assignment_action_space(
+                villager_count=villager_count,
+                resource_count=resource_count,
+            )
+        elif action_mode == JOINT_ASSIGNMENT_CLICK_MODE:
+            self.action_space = joint_assignment_action_space(
+                villager_count=villager_count,
+                resource_count=resource_count,
+            )
+        else:
+            self.action_space = spaces.Box(
+                -1.0,
+                1.0,
+                shape=(3 * villager_count,),
+                dtype=np.float32,
+            )
         self._roster: Roster | None = None
         self._step_count = 0
         self._initial_stock = 0.0
         self._previous_stock = 0.0
         self._previous_carried: tuple[float, ...] = ()
-        self._previous_distance: tuple[float, ...] = ()
-        self._target_index: tuple[int, ...] = ()
+        self._previous_villager_xz: tuple[tuple[float, float], ...] = ()
+        self._target_index: tuple[int | None, ...] = ()
         self._cycle_active: tuple[bool, ...] = ()
         self._delivered: tuple[float, ...] = ()
         self._last_remaining: tuple[float, ...] = ()
@@ -143,6 +199,16 @@ class ZeroADTeamGatherEnv(gym.Env):
     # ------------------------------------------------------------------ engine
 
     def _roster_for(self, state: Any) -> Roster:
+        if self._roster is not None:
+            return refresh_roster(
+                state,
+                previous=self._roster,
+                villager_count=self.villager_count,
+                resource_count=self.resource_count,
+                villager_type=VILLAGER_TYPE,
+                resource_type=RESOURCE_TYPE,
+                dropsite_type=DROPSITE_TYPE,
+            )
         return build_roster(
             state,
             villager_count=self.villager_count,
@@ -213,18 +279,42 @@ class ZeroADTeamGatherEnv(gym.Env):
 
     # ------------------------------------------------------------------- reset
 
+    def _scenario_for_reset(self) -> str:
+        """Return an immutable per-episode scenario with a fresh map seed."""
+
+        if not self.randomize_layout:
+            self._layout_seed = None
+            return self.scenario_config
+        if self._scenario_template is None:
+            raise RuntimeError("missing randomized scenario template")
+        layout_seed = int(self.np_random.integers(0, 2**31))
+        settings = self._scenario_template["settings"]
+        scenario = {
+            **self._scenario_template,
+            "settings": {
+                **settings,
+                "Seed": layout_seed,
+                "AISeed": layout_seed,
+            },
+        }
+        self._layout_seed = layout_seed
+        return json.dumps(scenario, separators=(",", ":"), sort_keys=True)
+
     def _reset_once(self, *, seed=None):
         super().reset(seed=seed)
-        state = self.game.reset(self.scenario_config, save_replay=self.save_replay)
+        # Resource ids belong to one generated map. Never carry a depleted-slot
+        # cache into the next reset, even if the engine happens to reuse ids.
+        self._roster = None
+        state = self.game.reset(
+            self._scenario_for_reset(),
+            save_replay=self.save_replay,
+        )
         if state is None:
             state = self.game.step()
         roster = self._roster_for(state)
         self._roster = roster
         villager_xz = tuple(xz(unit.position()) for unit in roster.villagers)
-        resource_xz = tuple(xz(unit.position()) for unit in roster.resources)
-        self._target_index = tuple(
-            nearest_index(villager, resource_xz) for villager in villager_xz
-        )
+        self._target_index = tuple(None for _ in roster.villagers)
         self._cycle_active = tuple(False for _ in roster.villagers)
         self._delivered = tuple(0.0 for _ in roster.villagers)
         stock, carried, remaining = self._read_engine(roster)
@@ -232,10 +322,7 @@ class ZeroADTeamGatherEnv(gym.Env):
         self._previous_stock = stock
         self._last_remaining = remaining
         self._previous_carried = carried
-        self._previous_distance = tuple(
-            distance(villager_xz[index], resource_xz[self._target_index[index]])
-            for index in range(self.villager_count)
-        )
+        self._previous_villager_xz = villager_xz
         self._step_count = 0
         observation = build_team_observation(
             self._snapshot(roster, stock, carried, remaining),
@@ -244,6 +331,7 @@ class ZeroADTeamGatherEnv(gym.Env):
         return observation, {
             "resource_stock": stock,
             "episode_resource_stock_delta": 0.0,
+            "layout_seed": self._layout_seed,
         }
 
     def reset(self, *, seed=None, options=None):
@@ -265,18 +353,40 @@ class ZeroADTeamGatherEnv(gym.Env):
         self,
         action: np.ndarray,
         roster: Roster,
-    ) -> tuple[list[Any], list[bool]]:
+    ) -> tuple[list[Any], list[bool], list[bool]]:
         commands: list[Any] = []
-        interrupted: list[bool] = []
+        disrupted: list[bool] = []
+        commanded: list[bool] = []
         resource_xz = [xz(unit.position()) for unit in roster.resources]
         dropsite_xz = xz(roster.dropsite.position())
         targets = list(self._target_index)
         cycles = list(self._cycle_active)
+        threshold = (
+            0.0
+            if self.action_mode
+            in {ASSIGNMENT_CLICK_MODE, JOINT_ASSIGNMENT_CLICK_MODE}
+            else self.click_action_threshold
+        )
         for villager in range(self.villager_count):
+            target = targets[villager]
+            # A destroyed tree remains a fixed action/observation slot, but it
+            # is no longer an active command target. Clearing it makes an idle
+            # worker available for another live tree on the next decision.
+            if target is not None and self._last_remaining[target] <= 0.0:
+                targets[villager] = None
+                cycles[villager] = False
             base = 3 * villager
             x, z = denormalize_action(action[base : base + 2], self.map_size_m)
-            clicked = float(action[base + 2]) > self.click_action_threshold
-            interrupted.append(False)
+            clicked = float(action[base + 2]) > threshold
+            # Busy means the engine is already doing productive work for this
+            # villager: chopping, or hauling a load back on its own. Tracking
+            # only the gather cycle let the first stray walk clear the flag and
+            # made every later command free, so a villager could hold a full
+            # load for the whole episode at no cost.
+            holding = self._previous_carried[villager] > 0.0
+            busy = cycles[villager] or holding
+            disrupted.append(False)
+            commanded.append(clicked)
             if not clicked:
                 continue
             unit = roster.villagers[villager]
@@ -290,27 +400,46 @@ class ZeroADTeamGatherEnv(gym.Env):
                 self.gather_command_distance,
             )
             if hits_dropsite and not hits_resource:
+                # Ordering the deposit a loaded villager is already making
+                # repeats its own work; ordering it while chopping throws the
+                # unfinished load away.
+                if busy and not holding:
+                    disrupted[villager] = True
+                targets[villager] = None
+                cycles[villager] = False
                 commands.append(self._return_resource_command(unit, roster.dropsite))
                 continue
             if hits_resource:
-                # Re-issuing the same gather order is not an interruption: the
+                if self._last_remaining[hit_resource] <= 0.0:
+                    # A categorical action can still name a dead fixed slot.
+                    # Do not turn that stale coordinate into a walk or send a
+                    # gather order for an entity 0 A.D. has already destroyed.
+                    commanded[-1] = False
+                    continue
+                # Re-issuing the same gather order is not a disruption: the
                 # villager keeps working the tree it already has. Only pointing
                 # it at a different tree throws away work in progress.
-                if cycles[villager] and targets[villager] != hit_resource:
-                    interrupted[villager] = True
+                repeat = (
+                    cycles[villager]
+                    and not holding
+                    and targets[villager] == hit_resource
+                )
+                if busy and not repeat:
+                    disrupted[villager] = True
                 targets[villager] = hit_resource
                 cycles[villager] = True
                 commands.append(
                     self._gather_command(unit, roster.resources[hit_resource])
                 )
                 continue
-            if cycles[villager]:
-                interrupted[villager] = True
+            if busy:
+                disrupted[villager] = True
+            targets[villager] = None
             cycles[villager] = False
             commands.append(self.actions.walk([unit], x, z))
         self._target_index = tuple(targets)
         self._cycle_active = tuple(cycles)
-        return commands, interrupted
+        return commands, disrupted, commanded
 
     def _return_resource_command(self, unit: Any, dropsite: Any) -> Any:
         """Order a deposit, falling back to a raw command for older clients."""
@@ -335,13 +464,78 @@ class ZeroADTeamGatherEnv(gym.Env):
             except TypeError:
                 raise error
 
+    def _decode_action(self, action: object, roster: Roster) -> np.ndarray:
+        if self.action_mode == ASSIGNMENT_CLICK_MODE:
+            assignments = np.asarray(action)
+            if assignments.shape != (self.villager_count,):
+                raise ValueError(
+                    "assignment action must contain one category per villager"
+                )
+        elif self.action_mode == JOINT_ASSIGNMENT_CLICK_MODE:
+            assignments = joint_assignment_from_index(
+                action,
+                villager_count=self.villager_count,
+                resource_count=self.resource_count,
+            )
+            assignments = self._joint_assignments_for_execution(assignments)
+        else:
+            values = np.asarray(action, dtype=np.float32).reshape(-1)
+            if values.size != 3 * self.villager_count:
+                raise ValueError("action must hold three values per villager")
+            return values
+
+        return assignment_to_raw_click(
+            assignments,
+            tuple(xz(unit.position()) for unit in roster.resources),
+            map_size_m=self.map_size_m,
+        )
+
+    def _joint_assignments_for_execution(
+        self,
+        assignments: np.ndarray,
+    ) -> np.ndarray:
+        """Remove state-invalid high-level commands before map-click decoding.
+
+        The categorical table guarantees a fresh command bundle has no duplicate
+        tree. This second, observed-state check keeps chopping targets reserved
+        for their current owner and turns vanished fixed slots into no-ops. It
+        mirrors the policy mask so a caller cannot bypass the M2 capacity
+        contract; choosing to interrupt a worker remains a learned action.
+        """
+
+        executable = assignments.copy()
+        reserved_owners: dict[int, int] = {}
+        for villager, target in enumerate(self._target_index):
+            carrying = self._previous_carried[villager] > 0.0
+            active = self._cycle_active[villager]
+            if (
+                active
+                and not carrying
+                and target is not None
+                and self._last_remaining[target] > 0.0
+            ):
+                reserved_owners[target + 1] = villager
+        for villager, category in enumerate(executable):
+            if category == 0:
+                continue
+            resource = int(category) - 1
+            if (
+                (
+                    int(category) in reserved_owners
+                    and reserved_owners[int(category)] != villager
+                )
+                or self._last_remaining[resource] <= 0.0
+            ):
+                executable[villager] = 0
+        return executable
+
     def _step_once(self, action):
         if self._roster is None:
             raise RuntimeError("the environment must be reset before stepping")
-        values = np.asarray(action, dtype=np.float32).reshape(-1)
-        if values.size != 3 * self.villager_count:
-            raise ValueError("action must hold three values per villager")
-        commands, interrupted = self._commands(values, self._roster)
+        values = self._decode_action(action, self._roster)
+        previous_villager_xz = self._previous_villager_xz
+        previous_carried = self._previous_carried
+        commands, disrupted, commanded = self._commands(values, self._roster)
         payload = commands or None
         step_many = getattr(self.game, "step_many", None)
         if self.sim_frame_observer is not None:
@@ -367,21 +561,26 @@ class ZeroADTeamGatherEnv(gym.Env):
         dropsite_xz = xz(roster.dropsite.position())
 
         villagers = []
-        current_distance = []
         for index in range(self.villager_count):
-            carrying = self._previous_carried[index] > 0.0
-            target_xz = (
-                dropsite_xz if carrying else resource_xz[self._target_index[index]]
+            carrying = previous_carried[index] > 0.0
+            target_index = self._target_index[index]
+            target_xz = dropsite_xz if carrying else (
+                None if target_index is None else resource_xz[target_index]
             )
-            now = distance(villager_xz[index], target_xz)
-            current_distance.append(now)
+            # Both ends of the step are measured against the same point. Storing
+            # last step's distance instead compared it against last step's
+            # target, so switching targets teleported the reference point and
+            # paid the move as if it were progress.
+            closed = 0.0 if target_xz is None else (
+                distance(previous_villager_xz[index], target_xz)
+                - distance(villager_xz[index], target_xz)
+            )
             villagers.append(
                 VillagerRewardInputs(
-                    distance_closed_m=self._previous_distance[index] - now,
-                    carried_resource_delta=(
-                        carried[index] - self._previous_carried[index]
-                    ),
-                    interrupted_gather_cycle=interrupted[index],
+                    distance_closed_m=closed,
+                    carried_resource_delta=(carried[index] - previous_carried[index]),
+                    disrupted_while_busy=disrupted[index],
+                    carrying_without_command=carrying and not commanded[index],
                 )
             )
         terms = compose_team_reward(
@@ -398,21 +597,42 @@ class ZeroADTeamGatherEnv(gym.Env):
             for index in range(self.villager_count)
         )
 
-        # A deposit ends whichever cycles were running, mirroring M1's rule that
-        # the cycle finishes when wood actually lands in the player's stock.
-        if stock > self._previous_stock:
-            self._cycle_active = tuple(False for _ in self._cycle_active)
+        # A deposit ends that villager's cycle, mirroring M1's rule that the
+        # cycle finishes when wood lands in the player's stock. Only the villager
+        # whose load actually dropped is finished: clearing the whole team's
+        # flags let one deposit erase three other villagers' work in progress
+        # from both the reward and the observation.
+        self._cycle_active = tuple(
+            False
+            if (
+                previous_carried[index] > carried[index]
+                or (
+                    target is not None
+                    and remaining[target] <= 0.0
+                )
+            )
+            else active
+            for index, (active, target) in enumerate(
+                zip(self._cycle_active, self._target_index, strict=True)
+            )
+        )
+        self._target_index = tuple(
+            None
+            if (
+                previous_carried[index] > carried[index]
+                or (target is not None and remaining[target] <= 0.0)
+            )
+            else target
+            for index, target in enumerate(self._target_index)
+        )
         self._previous_stock = stock
         self._previous_carried = carried
         self._last_remaining = remaining
-        self._previous_distance = tuple(current_distance)
+        self._previous_villager_xz = villager_xz
         self._step_count += 1
 
         episode_delta = stock - self._initial_stock
-        everyone_delivered = min(self._delivered) >= self.min_delivery_per_villager
-        terminated = (
-            episode_delta >= self.stock_success_threshold and everyone_delivered
-        )
+        terminated = episode_delta >= self.stock_success_threshold
         truncated = not terminated and self._step_count >= self.horizon
         observation = build_team_observation(
             self._snapshot(roster, stock, carried, remaining),
@@ -422,10 +642,13 @@ class ZeroADTeamGatherEnv(gym.Env):
             "resource_stock": stock,
             "resource_stock_delta": terms.stock_delta,
             "episode_resource_stock_delta": episode_delta,
+            "layout_seed": self._layout_seed,
             "distance_shaping_reward": terms.distance_shaping,
             "carried_resource_delta_reward": terms.carried_delta,
             "click_gather_cycle_penalty": terms.click_penalty,
+            "carrying_no_click_reward": terms.carrying_no_click,
             "commands": len(commands),
+            "disrupted_villagers": sum(1 for value in disrupted if value),
             "delivered_per_villager": self._delivered,
             "min_delivered": min(self._delivered),
             "working_villagers": sum(
@@ -449,7 +672,12 @@ class ZeroADTeamGatherEnv(gym.Env):
             return observation, 0.0, False, True, info
 
     def capture_agent_frame(self):
-        """Capture the engine-rendered view centred on one team member."""
+        """Capture the engine-rendered view of the team or of one member.
+
+        The team view uses the dropsite to select the owning player's line of
+        sight, then centres and widens the camera around every villager,
+        resource, and the dropsite itself.
+        """
 
         state = getattr(self.game, "current_state", None)
         if state is None:
@@ -457,13 +685,68 @@ class ZeroADTeamGatherEnv(gym.Env):
                 "the engine observer needs a current game state before capture"
             )
         roster = self._roster if self._roster is not None else self._roster_for(state)
-        unit = roster.villagers[self.observer_villager_slot]
-        entity_id = getattr(unit, "id", None)
+        if self.observer_view == "villager":
+            unit = roster.villagers[self.observer_villager_slot]
+            entity_id = getattr(unit, "id", None)
+            if not callable(entity_id):
+                raise EngineObserverUnavailable(
+                    "the zero_ad entity does not expose an engine entity ID"
+                )
+            return self.engine_observer.capture(entity_id())
+        if roster.dropsite is None:
+            raise EngineObserverUnavailable("the team view needs a storehouse")
+        entity_id = getattr(roster.dropsite, "id", None)
         if not callable(entity_id):
             raise EngineObserverUnavailable(
                 "the zero_ad entity does not expose an engine entity ID"
             )
-        return self.engine_observer.capture(entity_id())
+        positions = [
+            xz(unit.position())
+            for unit in (*roster.villagers, *roster.resources, roster.dropsite)
+        ]
+        min_x = min(x for x, _z in positions)
+        max_x = max(x for x, _z in positions)
+        min_z = min(z for _x, z in positions)
+        max_z = max(z for _x, z in positions)
+        centre = ((min_x + max_x) / 2.0, (min_z + max_z) / 2.0)
+        span = max(max_x - min_x, max_z - min_z) / 2.0
+        return self.engine_observer.capture(
+            entity_id(),
+            view_range_m=span + self.observer_view_margin_m,
+            focus_xz=centre,
+        )
+
+    def capture_schematic_frame(self, action: object):
+        """Render the whole current team when the engine frame is unavailable."""
+
+        if self._roster is None or self._roster.dropsite is None:
+            raise RuntimeError("the environment must be reset before rendering")
+        raw_action = self._decode_action(action, self._roster)
+        threshold = (
+            0.0
+            if self.action_mode
+            in {ASSIGNMENT_CLICK_MODE, JOINT_ASSIGNMENT_CLICK_MODE}
+            else self.click_action_threshold
+        )
+        targets = tuple(
+            denormalize_action(raw_action[base : base + 2], self.map_size_m)
+            for base in range(0, raw_action.size, 3)
+            if float(raw_action[base + 2]) > threshold
+        )
+        return render_team_observer_frame(
+            TeamRenderState(
+                villager_xz=tuple(
+                    xz(unit.position()) for unit in self._roster.villagers
+                ),
+                resource_xz=tuple(
+                    xz(unit.position()) for unit in self._roster.resources
+                ),
+                resource_remaining=self._last_remaining,
+                carried=self._previous_carried,
+                dropsite_xz=xz(self._roster.dropsite.position()),
+                targets_xz=targets,
+            )
+        )
 
     def close(self):
         """Release the backend exactly once."""

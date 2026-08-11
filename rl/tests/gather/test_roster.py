@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from rl.gather.roster import Roster, RosterError, build_roster
+from rl.gather.roster import Roster, RosterError, build_roster, refresh_roster
 
 
 @dataclass(frozen=True)
@@ -54,6 +54,22 @@ def test_roster_slot_order_survives_a_shuffled_engine_listing():
     assert [unit.id() for unit in first.resources] == [
         unit.id() for unit in second.resources
     ]
+
+
+def test_roster_keeps_a_depleted_resource_in_its_original_slot():
+    first = build_roster(_state([10, 20], [5, 7]), villager_count=2, resource_count=2)
+
+    refreshed = refresh_roster(
+        _state([20, 10], [5]),
+        previous=first,
+        villager_count=2,
+        resource_count=2,
+    )
+
+    # 0 A.D. removes depleted supplies. The fixed action/observation slot for
+    # entity 7 must nevertheless retain its id and last known location.
+    assert [unit.id() for unit in refreshed.resources] == [5, 7]
+    assert refreshed.resources[1].position() == (0.0, 7.0)
 
 
 def test_roster_rejects_an_unexpected_villager_count():

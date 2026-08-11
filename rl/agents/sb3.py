@@ -59,6 +59,14 @@ def _resolve_policy(policy: Any) -> Any:
         from .shared_policy import SharedVillagerActorCriticPolicy
 
         return SharedVillagerActorCriticPolicy
+    if policy == "TeamAssignmentPolicy":
+        from .assignment_policy import TeamAssignmentActorCriticPolicy
+
+        return TeamAssignmentActorCriticPolicy
+    if policy == "JointAssignmentPolicy":
+        from .assignment_policy import JointAssignmentActorCriticPolicy
+
+        return JointAssignmentActorCriticPolicy
     return policy
 
 
@@ -292,7 +300,9 @@ class SB3Policy:
             observation,
             deterministic=deterministic,
         )
-        return np.asarray(action, dtype=np.float32)
+        action_space = getattr(self.model, "action_space", None)
+        action_dtype = getattr(action_space, "dtype", np.dtype(np.float32))
+        return np.asarray(action, dtype=action_dtype)
 
     def save(self, path: str | Path) -> None:
         _save_checkpoint(self.model, path)

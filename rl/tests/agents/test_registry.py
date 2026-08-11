@@ -5,7 +5,7 @@ import pytest
 from gymnasium import spaces
 
 from rl.agents.base import AgentSpec, Policy
-from rl.agents.baselines import GatherOraclePolicy, RandomPolicy
+from rl.agents.baselines import GatherOraclePolicy, RandomPolicy, TeamGatherOraclePolicy
 from rl.agents.registry import (
     AgentCapabilityError,
     UnknownAgentError,
@@ -26,6 +26,13 @@ class DummyEnv:
 
 class CommandDummyEnv:
     action_space = spaces.Box(-1.0, 1.0, shape=(3,), dtype=np.float32)
+
+
+class AssignmentTeamDummyEnv:
+    action_space = spaces.MultiDiscrete([3, 3])
+    action_mode = "assignment_click"
+    villager_count = 2
+    resource_count = 2
 
 
 class SavableModel:
@@ -77,6 +84,23 @@ def test_registry_builds_oracle_that_matches_command_action_space():
         oracle.act(observation, deterministic=True),
         np.array([0.25, -0.75, 1.0], dtype=np.float32),
     )
+
+
+def test_registry_builds_team_oracle_for_the_environment_action_mode():
+    oracle = build_policy(AgentSpec("team_oracle"), AssignmentTeamDummyEnv(), seed=11)
+    observation = np.zeros((2, 21), dtype=np.float32)
+    for resource in range(AssignmentTeamDummyEnv.resource_count):
+        remaining = (
+            TeamGatherOraclePolicy.CORE_WIDTH
+            + resource * TeamGatherOraclePolicy.RELATIONAL_WIDTH
+            + TeamGatherOraclePolicy.REMAINING_OFFSET
+        )
+        observation[:, remaining] = 1.0
+
+    action = oracle.act(observation, deterministic=True)
+
+    assert isinstance(oracle, TeamGatherOraclePolicy)
+    np.testing.assert_array_equal(action, np.array([1, 2], dtype=np.int64))
 
 
 def test_registry_builds_the_sb3_trainer_without_importing_sb3():

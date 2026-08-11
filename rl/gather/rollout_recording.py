@@ -156,6 +156,9 @@ class AgentViewRolloutRecorder:
                 "recording schematic rollout frame instead",
                 flush=True,
             )
+            capture_schematic = getattr(self.env, "capture_schematic_frame", None)
+            if callable(capture_schematic):
+                return capture_schematic(record.action), "schematic"
             return _schematic_frame(record), "schematic"
         raise EngineObserverUnavailable(
             "engine observer did not produce a frame after several attempts; "

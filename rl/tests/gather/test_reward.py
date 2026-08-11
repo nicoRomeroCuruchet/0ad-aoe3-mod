@@ -12,14 +12,16 @@ SCALES = TeamRewardScales(
     distance_shaping_scale=0.02,
     carried_resource_delta_reward_scale=0.2,
     click_gather_cycle_penalty=1.0,
+    carrying_no_click_reward=0.1,
 )
 
 
-def _villager(closed=0.0, carried_delta=0.0, interrupted=False):
+def _villager(closed=0.0, carried_delta=0.0, interrupted=False, holding=False):
     return VillagerRewardInputs(
         distance_closed_m=closed,
         carried_resource_delta=carried_delta,
-        interrupted_gather_cycle=interrupted,
+        disrupted_while_busy=interrupted,
+        carrying_without_command=holding,
     )
 
 
@@ -56,6 +58,15 @@ def test_interruption_penalty_is_averaged_and_subtracted():
 
     assert terms.click_penalty == pytest.approx(0.25)
     assert terms.total() == pytest.approx(-0.25)
+
+
+def test_holding_a_load_untouched_is_paid_and_averaged():
+    villagers = (_villager(holding=True), _villager(), _villager(), _villager())
+
+    terms = compose_team_reward(0.0, villagers, SCALES)
+
+    assert terms.carrying_no_click == pytest.approx(0.025)
+    assert terms.total() == pytest.approx(0.025)
 
 
 def test_terms_sum_into_the_total():

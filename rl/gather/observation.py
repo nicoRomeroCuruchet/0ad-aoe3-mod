@@ -14,15 +14,16 @@ from .core import (
 )
 
 
-# Indices 0-9 of every slice are M1's observation, in M1's order, so an M1
-# checkpoint can initialize the shared network's input prefix unchanged.
+# Indices 0-9 retain M1's field names and order for diagnostics. M2 uses a
+# separate categorical policy, so it does not assume M1's continuous weights or
+# distance scale are transferable.
 TEAM_CORE_LABELS = GATHER_LIFECYCLE_OBSERVATION_LABELS
 
 RELATIONAL_FIELDS = (
     "dx_norm",
     "dz_norm",
     "dist_norm",
-    "other_villager_closer",
+    "is_current_target",
     "remaining_norm",
 )
 
@@ -45,7 +46,7 @@ class TeamSnapshot:
     resource_xz: tuple[tuple[float, float], ...]
     resource_remaining: tuple[float, ...]
     carried: tuple[float, ...]
-    target_index: tuple[int, ...]
+    target_index: tuple[int | None, ...]
     gather_cycle_active: tuple[bool, ...]
     dropsite_xz: tuple[float, float]
     stock: float
@@ -64,7 +65,9 @@ class TeamSnapshot:
         if not self.resource_xz:
             raise ValueError("a team snapshot needs at least one resource")
         if any(
-            index < 0 or index >= len(self.resource_xz) for index in self.target_index
+            index is not None
+            and (index < 0 or index >= len(self.resource_xz))
+            for index in self.target_index
         ):
             raise ValueError("target_index out of range")
 
@@ -92,25 +95,28 @@ def build_team_observation(
 
     villager_count = len(snapshot.villager_xz)
     stock_norm = normalize_non_negative(snapshot.stock, scales.stock_scale)
+    distance_scale_m = np.sqrt(2.0) * scales.map_size_m
     dropsite = (
         normalize_coord(snapshot.dropsite_xz[0], scales.map_size_m),
         normalize_coord(snapshot.dropsite_xz[1], scales.map_size_m),
     )
-    distances = [
-        [distance(villager, resource) for resource in snapshot.resource_xz]
-        for villager in snapshot.villager_xz
-    ]
-
     slices = []
     for villager in range(villager_count):
         villager_xz = snapshot.villager_xz[villager]
-        target = snapshot.resource_xz[snapshot.target_index[villager]]
+        target_index = snapshot.target_index[villager]
+        if target_index is None:
+            target_fields = (0.0, 0.0, 0.0)
+        else:
+            target = snapshot.resource_xz[target_index]
+            target_fields = (
+                normalize_coord(target[0], scales.map_size_m),
+                normalize_coord(target[1], scales.map_size_m),
+                distance(villager_xz, target) / distance_scale_m,
+            )
         values = [
             normalize_coord(villager_xz[0], scales.map_size_m),
             normalize_coord(villager_xz[1], scales.map_size_m),
-            normalize_coord(target[0], scales.map_size_m),
-            normalize_coord(target[1], scales.map_size_m),
-            distance(villager_xz, target) / scales.map_size_m,
+            *target_fields,
             normalize_non_negative(
                 snapshot.carried[villager],
                 scales.carried_resource_scale,
@@ -122,18 +128,13 @@ def build_team_observation(
             0.0 if villager_count == 1 else villager / (villager_count - 1),
         ]
         for resource, resource_xz in enumerate(snapshot.resource_xz):
-            own_distance = distances[villager][resource]
-            others_closer = any(
-                distances[other][resource] < own_distance
-                for other in range(villager_count)
-                if other != villager
-            )
+            own_distance = distance(villager_xz, resource_xz)
             values.extend(
                 [
                     (resource_xz[0] - villager_xz[0]) / scales.map_size_m,
                     (resource_xz[1] - villager_xz[1]) / scales.map_size_m,
-                    own_distance / scales.map_size_m,
-                    float(others_closer),
+                    own_distance / distance_scale_m,
+                    float(target_index == resource),
                     normalize_non_negative(
                         snapshot.resource_remaining[resource],
                         scales.resource_amount_scale,

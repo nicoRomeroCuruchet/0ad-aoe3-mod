@@ -20,17 +20,26 @@ Ambos vienen de las mismas cuatro corridas comparadas en `rl/sac_ppo_comparison.
 | `m0_ppo.mp4` | M0 &mdash; PPO | 4.5 s (90 turnos) | lo mismo, frena a 3.5 m |
 | `m1_sac.mp4` | M1 &mdash; SAC | 24 s (480 turnos) | ciclo completo: ir, juntar, volver, depositar 20 de madera |
 | `m1_ppo.mp4` | M1 &mdash; PPO | 24 s (480 turnos) | ídem, con el mejor reward de evaluación (30.1) |
-| `m2_ppo.mp4` | M2 &mdash; PPO | 80 s (1600 turnos) | 4 aldeanos, 4 árboles: 80 de madera depositada |
+| `m2_ppo.mp4` | M2 **legacy** &mdash; PPO | 80 s (1600 turnos) | benchmark anterior: 4 aldeanos, 4 árboles y +80 de madera |
+| `m2_ppo_assignment_team.mp4` | M2 asignación **legacy** &mdash; PPO | 24 s (480 turnos) | vista de equipo del benchmark anterior: +80 en 6 decisiones |
+| `m2_ppo_joint_ring_team.mp4` | M2 PPO vigente | 72 s (1440 turnos) | 4 aldeanos agotan y entregan los 6 robles del anillo (+600) en vista de equipo |
 
-En M2 la cámara sigue **un** aldeano (`observer_villager_slot`, por defecto el slot 0): su radio
-de visión es 32 m, así que los otros tres suelen quedar fuera de cuadro. Para ver el reparto de
-trabajo hay que grabar los cuatro slots y ponerlos en mosaico.
+Los dos videos M2 existentes son **archivales**. Se grabaron antes del diseño vigente: seis
+robles de 100, uno por recolector, anillo equiangular rotado por seed, objetivo colectivo de 600
+y acción conjunta sin colisiones `Discrete(1045)`. No prueban ni deben usarse para comparar ese
+benchmark nuevo. El primero además se grabó antes del observer de equipo y por eso todavía sigue
+un solo aldeano.
+
+La grabación M2 vigente usa `observer_view = "team"`: calcula una caja alrededor de los
+cuatro aldeanos, los seis árboles y el depósito, y ajusta el centro y rango de una única
+cámara. Así muestran el reparto completo alrededor del anillo sin cuatro POVs ni mosaico. La
+niebla de guerra sigue siendo la del Player 1, por lo que una zona del encuadre puede verse negra
+aunque esté dentro de cámara.
 
 512&times;512, H.264 (`libx264`, crf 20, `yuv420p`, `+faststart`), 20 fps &mdash; un cuadro por turno de simulación, que en 0 A.D. dura
-200 ms, así que la reproducción va a velocidad real. La cámara es la vista del observador
-del engine parcheado: mira desde arriba al Polites y abarca su radio de visión (32 m), por
-eso el aldeano se ve chico y el árbol aparece recién cuando entra en ese radio. La niebla de
-guerra del borde es real, no un viñeteado.
+200 ms, así que la reproducción va a velocidad real. La cámara sale del observer del engine
+parcheado. M0/M1 miran desde arriba al Polites y abarcan su radio de visión (32 m); M2 usa el
+encuadre dinámico del equipo. La niebla de guerra del borde es real, no un viñeteado.
 
 ### Regenerarlos
 
@@ -46,6 +55,14 @@ make server-view      # terminal 1
   --episodes 1 --mode deterministic \
   --record-agent-view /tmp/rollout_m1_ppo --record-sim-turns \
   --record-agent-view-video media/videos/m1_ppo.webm
+
+# M2 vigente: matching conjunto de 1045 opciones, anillo de 6×100 y equipo completo.
+# Usar una corrida nueva; los modelos previos a este espacio de acción son incompatibles.
+.venv/bin/python -m rl.eval --experiment rl/configs/m2_sb3_ppo.toml \
+  --model rl/runs/LA_CORRIDA/model --trust-model \
+  --episodes 1 --mode deterministic \
+  --record-agent-view /tmp/rollout_m2_ppo --record-sim-turns \
+  --record-agent-view-video media/videos/m2_ppo_joint_ring_team.mp4
 ```
 
 `--record-sim-turns` es lo que hace que el video sea fluido: sin ese flag se graba **un

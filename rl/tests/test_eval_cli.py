@@ -207,6 +207,28 @@ def test_verbose_observer_reports_denormalized_target_and_applies_delay(
     assert "parts=[carry=+2.00 wait=+0.02 interrupt=-1.00]" in output
 
 
+def test_verbose_observer_reports_assignment_categories(capsys):
+    env = OneStepEnv()
+    env.action_mode = "assignment_click"
+    observer = eval_cli.make_step_observer(env, verbose=True, delay=0.0)
+    record = StepRecord(
+        episode=0,
+        step=1,
+        observation=np.zeros(5, dtype=np.float32),
+        action=np.array([0, 2, 1, 0], dtype=np.int64),
+        reward=0.0,
+        terminated=False,
+        truncated=False,
+        info={},
+    )
+
+    observer(record)
+
+    assert "assignments=['NO_CLICK', 'TREE_1', 'TREE_0', 'NO_CLICK']" in (
+        capsys.readouterr().out
+    )
+
+
 def test_agent_view_observer_updates_before_pre_action_delay():
     events = []
     agent_view = FakeAgentView(events)

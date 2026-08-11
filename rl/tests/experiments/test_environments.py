@@ -272,3 +272,29 @@ def test_gather_environment_bounds_the_combined_episode_workload():
 
     with pytest.raises(EnvironmentConfigError, match="combined workload"):
         build_environment(config)
+
+
+def test_team_gather_environment_rejects_unknown_action_modes():
+    config = EnvironmentConfig(
+        name="zero_ad_team_gather",
+        parameters={
+            "scenario": "rl/scenarios/team_reset_config.json",
+            "action_mode": "semantic_gather",
+        },
+    )
+
+    with pytest.raises(EnvironmentConfigError, match="action_mode"):
+        build_environment(config)
+
+
+def test_team_gather_environment_requires_a_boolean_layout_randomization_flag():
+    config = EnvironmentConfig(
+        name="zero_ad_team_gather",
+        parameters={
+            "scenario": "rl/scenarios/team_reset_config.json",
+            "randomize_layout": 1,
+        },
+    )
+
+    with pytest.raises(EnvironmentConfigError, match="randomize_layout"):
+        build_environment(config)

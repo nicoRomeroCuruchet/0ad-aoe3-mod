@@ -12,6 +12,8 @@ PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-agent-observer.patch"
 THROUGHPUT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-throughput.patch"
 STEP_BATCH_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-step-batching.patch"
 IDLE_WAIT_PATCH_FILE="$REPO_ROOT/engine/patches/0ad-v0.28.0-rl-idle-wait.patch"
+LEGACY_FOCUS_OBSERVER_PATCH_SHA256="2250ecb98256c82bc3ae6c36ce3061ea12dfc2989594b0671c655e7c77bb1385"
+LEGACY_STEP_BATCH_PATCH_SHA256="15ece053ca504514322c69e202129d30369dd767222b483dd13d239bdf6d8d7d"
 SOURCE_URL="https://releases.wildfiregames.com/$ARCHIVE_NAME"
 SOURCE_SHA256="27e217755ef76a922fe58dbf593d96e54b6ed2375d23f548c35619aa6bd5a42a"
 RUSTUP_VERSION="1.28.2"
@@ -110,6 +112,27 @@ if ! flock --nonblock "$observer_lock_fd"; then
 	exit 1
 fi
 
+migrate_cached_focus_observer() {
+	local interface_file="$1"
+	local interface_header="${interface_file%.cpp}.h"
+	local old_protocol='constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v2";'
+	local new_protocol='constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v3";'
+
+	# Some cached observer builds already contain the complete x/z focus
+	# implementation but still advertise v2. Only migrate that exact known
+	# shape; incomplete or otherwise modified sources keep the fail-closed path.
+	if [[ "$(grep --fixed-strings --count "$old_protocol" "$interface_file")" -ne 1 ]] ||
+		! grep --fixed-strings --quiet "ParseObserverCoordinate(" "$interface_file" ||
+		! grep --fixed-strings --quiet "hasFocus ? focusX" "$interface_file" ||
+		! grep --fixed-strings --quiet "hasFocus ? focusZ" "$interface_file" ||
+		! grep --fixed-strings --quiet "observerHasFocus" "$interface_header"; then
+		return 1
+	fi
+
+	sed -i 's/0ad-rl-observer-v2/0ad-rl-observer-v3/' "$interface_file"
+	grep --fixed-strings --quiet "$new_protocol" "$interface_file"
+}
+
 apply_engine_patch() {
 	local patch_file="$1"
 	local feature_file="$2"
@@ -118,6 +141,7 @@ apply_engine_patch() {
 	local patch_checksum
 	local stamp_file
 	local stamped_checksum=""
+	local compatible_stamp=0
 
 	patch_name="$(basename "$patch_file")"
 	patch_checksum="$(sha256sum "$patch_file" | cut -d ' ' -f 1)"
@@ -126,6 +150,30 @@ apply_engine_patch() {
 		read -r stamped_checksum < "$stamp_file"
 		if [[ "$stamped_checksum" == "$patch_checksum" ]]; then
 			printf '%s is already applied.\n' "$patch_name"
+			return
+		fi
+		if [[ "$patch_name" == "0ad-v0.28.0-agent-observer.patch" &&
+			"$stamped_checksum" == "$LEGACY_FOCUS_OBSERVER_PATCH_SHA256" ]]; then
+			if grep --fixed-strings --quiet "$feature_marker" \
+				"$SOURCE_DIR/$feature_file" ||
+				migrate_cached_focus_observer "$SOURCE_DIR/$feature_file"; then
+				compatible_stamp=1
+				printf '%s\n' \
+					'Migrated cached observer protocol from v2 to focus-capable v3.'
+			fi
+		elif [[ "$patch_name" == "0ad-v0.28.0-step-batching.patch" &&
+			"$stamped_checksum" == "$LEGACY_STEP_BATCH_PATCH_SHA256" ]] &&
+			grep --fixed-strings --quiet "0ad-rl-observer-v3" \
+				"$SOURCE_DIR/$feature_file"; then
+			# The batched-step implementation is unchanged; only its observer
+			# protocol context moved from v2 to v3.
+			compatible_stamp=1
+		fi
+		if [[ "$compatible_stamp" -eq 1 ]] &&
+			grep --fixed-strings --quiet "$feature_marker" \
+			"$SOURCE_DIR/$feature_file"; then
+			printf '%s\n' "$patch_checksum" > "$stamp_file"
+			printf '%s is already applied; refreshed its patch stamp.\n' "$patch_name"
 			return
 		fi
 		printf 'Cached source has a different version of %s; remove %s and rebuild.\n' \
@@ -155,7 +203,7 @@ apply_engine_patch() {
 }
 
 apply_engine_patch "$PATCH_FILE" \
-	"source/rlinterface/RLInterface.cpp" "RenderObserverFrame"
+	"source/rlinterface/RLInterface.cpp" "0ad-rl-observer-v3"
 apply_engine_patch "$THROUGHPUT_PATCH_FILE" \
 	"source/ps/GameSetup/GameSetup.cpp" "args.Has(\"rl-interface\")"
 apply_engine_patch "$STEP_BATCH_PATCH_FILE" \
@@ -226,11 +274,6 @@ if [[ "$cbindgen_version" != "cbindgen 0.29.0" ]]; then
 	"$CARGO_HOME/bin/cargo" install --force --locked cbindgen@0.29.0
 fi
 
-# Boost.System has been header-only for years; this keeps the Release 28
-# workspace compatible with current Ubuntu packages, matching setup.sh.
-sed -i 's#unix_names = { os.findlib("boost_filesystem-mt") and "boost_filesystem-mt" or "boost_filesystem", os.findlib("boost_system-mt") and "boost_system-mt" or "boost_system" },#unix_names = { os.findlib("boost_filesystem-mt") and "boost_filesystem-mt" or "boost_filesystem" },#' \
-	"$SOURCE_DIR/build/premake/extern_libs5.lua"
-
 missing_packages=()
 for command in cc g++ make tar curl patch m4 python3; do
 	if ! command -v "$command" >/dev/null 2>&1; then
@@ -273,12 +316,6 @@ fi
 if ! printf '#include <boost/random/linear_congruential.hpp>\n' | g++ -E -x c++ - >/dev/null 2>&1; then
 	missing_packages+=(libboost-dev)
 fi
-boost_filesystem_test="$RUNTIME_ROOT/boost-filesystem-link-test"
-if ! printf 'int main() { return 0; }\n' | \
-	g++ -x c++ - -lboost_filesystem -o "$boost_filesystem_test" >/dev/null 2>&1; then
-	missing_packages+=(libboost-filesystem-dev)
-fi
-rm -f "$boost_filesystem_test"
 if ! printf '#include <uuid/uuid.h>\n' | cc -E - >/dev/null 2>&1; then
 	missing_packages+=(uuid-dev)
 fi

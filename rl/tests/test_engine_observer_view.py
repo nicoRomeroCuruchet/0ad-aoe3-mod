@@ -83,6 +83,31 @@ def test_client_checks_protocol_and_requests_an_owned_entity_frame():
     assert all(timeout == 2.0 for _request, timeout in requests)
 
 
+def test_client_advertises_and_requests_explicit_map_focus():
+    requests = []
+    ppm = b"P6\n1 1\n255\n\x10\x20\x30"
+
+    def opener(request, *, timeout):
+        requests.append((request, timeout))
+        if request.full_url.endswith("/observer/status"):
+            return FakeResponse(ENGINE_OBSERVER_PROTOCOL.encode())
+        return FakeResponse(ppm, "image/x-portable-pixmap")
+
+    client = EngineObserverClient("http://127.0.0.1:6000", opener=opener)
+
+    client.check_available()
+    client.capture(42, view_range_m=185.0, focus_xz=(225.0, 125.0))
+
+    assert ENGINE_OBSERVER_PROTOCOL == "0ad-rl-observer-v3"
+    assert [request.full_url for request, _timeout in requests] == [
+        "http://127.0.0.1:6000/observer/status",
+        (
+            "http://127.0.0.1:6000/observe?"
+            "entity=42&range=185.000&x=225.000&z=125.000"
+        ),
+    ]
+
+
 def test_client_reports_stock_engine_404_with_build_instruction():
     def opener(request, *, timeout):
         raise HTTPError(request.full_url, 404, "Not Found", {}, None)
@@ -106,6 +131,36 @@ def test_engine_patch_restores_and_presents_the_normal_view_after_readback():
     assert readback < restore < normal_render < present
 
 
+def test_engine_patch_threads_optional_focus_coordinates_to_the_camera():
+    patch = OBSERVER_PATCH.read_text()
+
+    assert f'OBSERVER_PROTOCOL = "{ENGINE_OBSERVER_PROTOCOL}"' in patch
+    for contract in (
+        "bool ParseObserverCoordinate(",
+        'request_info->query_string, "x", focusX, hasFocusX',
+        'request_info->query_string, "z", focusZ, hasFocusZ',
+        "hasFocusX != hasFocusZ",
+        "message.observerHasFocus = hasFocus;",
+        "message.observerFocusX = focusX;",
+        "message.observerFocusZ = focusZ;",
+        "msg.observerFocusX, msg.observerFocusZ",
+        "hasFocus ? focusX : fixedPosition.X.ToFloat()",
+        "hasFocus ? focusZ : fixedPosition.Z.ToFloat()",
+        "bool observerHasFocus = false;",
+        "float observerFocusX = 0.0f;",
+        "float observerFocusZ = 0.0f;",
+    ):
+        assert contract in patch
+
+
+def test_engine_observer_patch_does_not_absorb_later_batching_artifacts():
+    patch = OBSERVER_PATCH.read_text()
+
+    assert "ParseTurnCount" not in patch
+    assert "MAX_BATCHED_TURNS" not in patch
+    assert ".orig" not in patch
+
+
 def test_nonvisual_engine_waits_for_rl_reset_without_an_autostart_map():
     patch = THROUGHPUT_PATCH.read_text()
     builder = Path("engine/build_observer.sh").read_text()
@@ -127,6 +182,7 @@ def test_engine_batch_route_is_distinct_and_bounded():
     patch = STEP_BATCH_PATCH.read_text()
     builder = Path("engine/build_observer.sh").read_text()
 
+    assert f'OBSERVER_PROTOCOL = "{ENGINE_OBSERVER_PROTOCOL}"' in patch
     assert 'uri == "/step_n"' in patch
     assert "MAX_BATCHED_TURNS = 10000" in patch
     assert "0ad-v0.28.0-step-batching.patch" in builder
@@ -135,11 +191,38 @@ def test_engine_batch_route_is_distinct_and_bounded():
 def test_engine_builder_recognizes_applied_features_after_context_changes():
     builder = Path("engine/build_observer.sh").read_text()
 
-    assert '"RenderObserverFrame"' in builder
+    assert f'"{ENGINE_OBSERVER_PROTOCOL}"' in builder
     assert 'args.Has(\\"rl-interface\\")' in builder
     assert '"MAX_BATCHED_TURNS"' in builder
     assert 'grep --fixed-strings --quiet "$feature_marker"' in builder
     assert 'sha256sum "$patch_file"' in builder
+
+
+def test_engine_builder_safely_migrates_a_cached_focus_capable_v2_source():
+    builder = Path("engine/build_observer.sh").read_text()
+
+    stamp_check = builder.index('if [[ -f "$stamp_file" ]]')
+    checksum_mismatch = builder.index(
+        'if [[ "$stamped_checksum" == "$patch_checksum" ]]', stamp_check
+    )
+    legacy_guard = builder.index(
+        '"$stamped_checksum" == "$LEGACY_FOCUS_OBSERVER_PATCH_SHA256"',
+        checksum_mismatch,
+    )
+    migration = builder.index("migrate_cached_focus_observer", checksum_mismatch)
+    feature_recheck = builder.index(
+        'grep --fixed-strings --quiet "$feature_marker"', migration
+    )
+    mismatch_error = builder.index("Cached source has a different version", migration)
+
+    assert '"0ad-rl-observer-v2"' in builder
+    assert f'"{ENGINE_OBSERVER_PROTOCOL}"' in builder
+    assert '"ParseObserverCoordinate("' in builder
+    assert '"observerHasFocus"' in builder
+    assert "2250ecb98256c82bc3ae6c36ce3061ea12dfc2989594b0671c655e7c77bb1385" in builder
+    assert "15ece053ca504514322c69e202129d30369dd767222b483dd13d239bdf6d8d7d" in builder
+    assert checksum_mismatch < legacy_guard < migration < feature_recheck
+    assert feature_recheck < mismatch_error
 
 
 def test_engine_patch_pins_observer_los_then_restores_the_viewed_player():
@@ -253,7 +336,10 @@ def test_observer_builder_skips_unneeded_debug_spidermonkey():
         assert dependency in builder
     assert "fmt/printf.h" in builder
     assert "boost/random/linear_congruential.hpp" in builder
-    assert "libboost-filesystem-dev" in builder
+    # Release 28 uses Boost headers here but does not link Boost.Filesystem.
+    # Requiring that unrelated library blocks an otherwise valid clean build.
+    assert "libboost-filesystem-dev" not in builder
+    assert "boost-filesystem-link-test" not in builder
     for option in ("--without-atlas", "--without-audio", "--without-lobby"):
         assert option in builder
     assert "BUILD_RELEASE_ONLY" in patch

@@ -5,20 +5,45 @@ from __future__ import annotations
 import numpy as np
 from gymnasium import spaces
 
+from rl.gather.assignment_actions import (
+    ASSIGNMENT_CLICK_MODE,
+    JOINT_ASSIGNMENT_CLICK_MODE,
+    RAW_CLICK_MODE,
+    joint_assignment_to_index,
+)
+
 
 class RandomPolicy:
-    """Sample reproducible actions from a finite continuous action space."""
+    """Sample reproducible actions from a supported finite action space."""
 
-    def __init__(self, action_space: spaces.Box, *, seed: int = 0) -> None:
-        if not np.issubdtype(action_space.dtype, np.floating):
-            raise TypeError("RandomPolicy requires a floating-point Box")
-        if not np.all(np.isfinite(action_space.low)) or not np.all(
-            np.isfinite(action_space.high)
-        ):
-            raise ValueError("RandomPolicy requires finite bounds")
-
-        self._low = np.asarray(action_space.low).copy()
-        self._high = np.asarray(action_space.high).copy()
+    def __init__(
+        self,
+        action_space: spaces.Box | spaces.Discrete | spaces.MultiDiscrete,
+        *,
+        seed: int = 0,
+    ) -> None:
+        if isinstance(action_space, spaces.MultiDiscrete):
+            self._mode = "multidiscrete"
+            self._low = np.asarray(action_space.start).copy()
+            self._high = self._low + np.asarray(action_space.nvec)
+        elif isinstance(action_space, spaces.Discrete):
+            self._mode = "discrete"
+            self._low = int(action_space.start)
+            self._high = self._low + int(action_space.n)
+        elif isinstance(action_space, spaces.Box):
+            if not np.issubdtype(action_space.dtype, np.floating):
+                raise TypeError("RandomPolicy requires a floating-point Box")
+            if not np.all(np.isfinite(action_space.low)) or not np.all(
+                np.isfinite(action_space.high)
+            ):
+                raise ValueError("RandomPolicy requires finite bounds")
+            self._mode = "box"
+            self._low = np.asarray(action_space.low).copy()
+            self._high = np.asarray(action_space.high).copy()
+        else:
+            raise TypeError(
+                "RandomPolicy requires a Box, Discrete, or MultiDiscrete space"
+            )
         self._dtype = action_space.dtype
         self._rng = np.random.default_rng(seed)
 
@@ -36,6 +61,17 @@ class RandomPolicy:
         """
 
         _ = observation, deterministic
+        if self._mode == "multidiscrete":
+            return self._rng.integers(
+                self._low,
+                self._high,
+                dtype=self._dtype,
+            )
+        if self._mode == "discrete":
+            return np.asarray(
+                self._rng.integers(self._low, self._high),
+                dtype=self._dtype,
+            )
         return self._rng.uniform(self._low, self._high).astype(
             self._dtype,
             copy=False,
@@ -83,12 +119,28 @@ class TeamGatherOraclePolicy:
     CARRIED_INDEX = 5
     DROPSITE_X_INDEX = 7
     DROPSITE_Z_INDEX = 8
+    CYCLE_ACTIVE_INDEX = 9
+    CURRENT_TARGET_OFFSET = 3
+    REMAINING_OFFSET = 4
 
-    def __init__(self, villager_count: int = 4, resource_count: int = 4) -> None:
+    def __init__(
+        self,
+        villager_count: int = 4,
+        resource_count: int = 4,
+        *,
+        action_mode: str = "raw_click",
+    ) -> None:
         if villager_count <= 0 or resource_count <= 0:
             raise ValueError("team oracle needs positive counts")
+        if action_mode not in {
+            RAW_CLICK_MODE,
+            ASSIGNMENT_CLICK_MODE,
+            JOINT_ASSIGNMENT_CLICK_MODE,
+        }:
+            raise ValueError("team oracle action_mode is invalid")
         self._villager_count = villager_count
         self._resource_count = resource_count
+        self._action_mode = action_mode
 
     def _tree_offsets(self, slice_values):
         offsets = []
@@ -102,6 +154,18 @@ class TeamGatherOraclePolicy:
                 )
             )
         return offsets
+
+    def _current_target(self, slice_values) -> int | None:
+        """Return this villager's live selected tree, if the observation has one."""
+
+        for resource in range(self._resource_count):
+            base = self.CORE_WIDTH + resource * self.RELATIONAL_WIDTH
+            if (
+                slice_values[base + self.CURRENT_TARGET_OFFSET] > 0.5
+                and slice_values[base + self.REMAINING_OFFSET] > 0.0
+            ):
+                return resource
+        return None
 
     def act(
         self,
@@ -119,6 +183,22 @@ class TeamGatherOraclePolicy:
         )
         if values.shape != expected:
             raise ValueError(f"observation shape {values.shape} != {expected}")
+
+        if self._action_mode in {
+            ASSIGNMENT_CLICK_MODE,
+            JOINT_ASSIGNMENT_CLICK_MODE,
+        }:
+            assignment = self._assignment_action(values)
+            if self._action_mode == JOINT_ASSIGNMENT_CLICK_MODE:
+                return np.asarray(
+                    joint_assignment_to_index(
+                        assignment,
+                        villager_count=self._villager_count,
+                        resource_count=self._resource_count,
+                    ),
+                    dtype=np.int64,
+                )
+            return assignment
 
         action = np.zeros(3 * self._villager_count, dtype=np.float32)
         claimed: set[int] = set()
@@ -143,4 +223,53 @@ class TeamGatherOraclePolicy:
             dx, dz, _dist = offsets[choice]
             action[base] = np.clip(slice_values[0] + 2.0 * dx, -1.0, 1.0)
             action[base + 1] = np.clip(slice_values[1] + 2.0 * dz, -1.0, 1.0)
+        return action
+
+    def _assignment_action(self, values: np.ndarray) -> np.ndarray:
+        action = np.zeros(self._villager_count, dtype=np.int64)
+        claimed = {
+            target
+            for villager in range(self._villager_count)
+            if (
+                values[villager, self.CARRIED_INDEX] > 0.0
+                or values[villager, self.CYCLE_ACTIVE_INDEX] > 0.0
+            )
+            for target in (self._current_target(values[villager]),)
+            if target is not None
+        }
+        for villager in range(self._villager_count):
+            slice_values = values[villager]
+            carrying = slice_values[self.CARRIED_INDEX] > 0.0
+            cycle_active = slice_values[self.CYCLE_ACTIVE_INDEX] > 0.0
+            busy = carrying or cycle_active
+            if busy:
+                # Re-sending the exact same gather target is explicitly
+                # non-disruptive in the environment. It makes the oracle a
+                # reliable ceiling even if UnitAI stalls an active finite-tree
+                # cycle after another villager has delivered.
+                if cycle_active and not carrying:
+                    target = self._current_target(slice_values)
+                    if target is not None:
+                        action[villager] = target + 1
+                continue
+            offsets = self._tree_offsets(slice_values)
+            available = [
+                resource
+                for resource in range(self._resource_count)
+                if resource not in claimed
+                and slice_values[
+                    self.CORE_WIDTH
+                    + resource * self.RELATIONAL_WIDTH
+                    + self.REMAINING_OFFSET
+                ]
+                > 0.0
+            ]
+            if not available:
+                continue
+            choice = min(
+                available,
+                key=lambda resource: offsets[resource][2],
+            )
+            claimed.add(choice)
+            action[villager] = choice + 1
         return action

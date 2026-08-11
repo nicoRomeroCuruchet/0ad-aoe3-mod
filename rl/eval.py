@@ -36,6 +36,10 @@ from rl.gather.agent_view import (
     make_agent_view_observer,
     open_agent_view,
 )
+from rl.gather.assignment_actions import (
+    JOINT_ASSIGNMENT_CLICK_MODE,
+    joint_assignment_from_index,
+)
 from rl.gather.core import denormalize_action
 from rl.gather.rollout_recording import AgentViewRolloutRecorder, mode_recording_dir
 
@@ -117,8 +121,27 @@ def make_step_observer(
         if not verbose:
             return
 
+        action_mode = getattr(env, "action_mode", None)
         map_size_m = getattr(env, "map_size_m", None)
-        if map_size_m is None:
+        if action_mode == "assignment_click":
+            assignments = np.asarray(record.action).reshape(-1)
+            labels = [
+                "NO_CLICK" if int(choice) == 0 else f"TREE_{int(choice) - 1}"
+                for choice in assignments
+            ]
+            target = f"assignments={labels}"
+        elif action_mode == JOINT_ASSIGNMENT_CLICK_MODE:
+            assignments = joint_assignment_from_index(
+                record.action,
+                villager_count=int(getattr(env, "villager_count")),
+                resource_count=int(getattr(env, "resource_count")),
+            )
+            labels = [
+                "NO_CLICK" if int(choice) == 0 else f"TREE_{int(choice) - 1}"
+                for choice in assignments
+            ]
+            target = f"joint_assignment={labels}"
+        elif map_size_m is None:
             target = f"action={record.action.tolist()}"
         else:
             x, z = denormalize_action(record.action, map_size_m)

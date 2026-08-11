@@ -1,15 +1,16 @@
 diff --git a/source/rlinterface/RLInterface.cpp b/source/rlinterface/RLInterface.cpp
-index dd08518..9182c84 100644
+index 20b60e3..e341502 100644
 --- a/source/rlinterface/RLInterface.cpp
 +++ b/source/rlinterface/RLInterface.cpp
-@@ -58,5 +58,6 @@ constexpr float OBSERVER_NEAR_PLANE = 1.0f;
+@@ -71,6 +71,7 @@ constexpr float OBSERVER_CAMERA_HEIGHT = 512.0f;
+ constexpr float OBSERVER_NEAR_PLANE = 1.0f;
  constexpr float OBSERVER_FAR_PLANE = 1024.0f;
- constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v1";
+ constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v3";
 +constexpr u32 MAX_BATCHED_TURNS = 10000;
  
  bool ParseObserverEntity(const char* queryString, entity_id_t& entity)
  {
-@@ -82,6 +83,28 @@ bool ParseObserverEntity(const char* queryString, entity_id_t& entity)
+@@ -150,6 +151,28 @@ bool ParseObserverCoordinate(
  	return true;
  }
  
@@ -38,7 +39,7 @@ index dd08518..9182c84 100644
  std::string MakePPM(const std::vector<u8>& bottomUpRGB)
  {
  	std::ostringstream header;
-@@ -139,10 +162,10 @@ std::string Interface::SendGameMessage(GameMessage&& msg)
+@@ -210,10 +233,10 @@ std::string Interface::SendGameMessage(GameMessage&& msg)
  	return m_ReturnValue;
  }
  
@@ -51,7 +52,7 @@ index dd08518..9182c84 100644
  }
  
  std::string Interface::Reset(ScenarioConfig&& scenario)
-@@ -226,6 +249,11 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -299,6 +322,11 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
  		"The engine observer is unavailable. Use the OpenGL renderer and keep the game window visible.";
  
@@ -63,7 +64,7 @@ index dd08518..9182c84 100644
  	switch (event)
  	{
  	case MG_NEW_REQUEST:
-@@ -265,7 +294,7 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -335,7 +363,7 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  
  			stream << gameState.c_str();
  		}
@@ -72,7 +73,7 @@ index dd08518..9182c84 100644
  		{
  			if (!interface->IsGameRunning())
  			{
-@@ -274,6 +303,14 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -343,6 +371,14 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  				return handled;
  			}
  
@@ -87,7 +88,7 @@ index dd08518..9182c84 100644
  			std::string data = GetRequestContent(conn);
  			std::stringstream postStream(data);
  			std::string line;
-@@ -292,7 +329,7 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -359,7 +395,7 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  				cmd.json_cmd = line.substr(splitPos + 1);
  				commands.push_back(std::move(cmd));
  			}
@@ -96,7 +97,7 @@ index dd08518..9182c84 100644
  			if (gameState.empty())
  			{
  				mg_printf(conn, "%s", notRunningResponse);
-@@ -531,14 +568,17 @@ void Interface::ApplyMessage(const GameMessage& msg)
+@@ -605,14 +641,17 @@ void Interface::ApplyMessage(const GameMessage& msg)
  			}
  
  			const u32 deltaRealTime = DEFAULT_TURN_LENGTH;
@@ -121,18 +122,18 @@ index dd08518..9182c84 100644
  			m_ReturnValue = GetGameState();
  			m_MsgApplied.notify_one();
 diff --git a/source/rlinterface/RLInterface.h b/source/rlinterface/RLInterface.h
-index 805f0ec..928be0a 100644
+index 05793ee..ff9a680 100644
 --- a/source/rlinterface/RLInterface.h
 +++ b/source/rlinterface/RLInterface.h
-@@ -64,6 +64,7 @@ struct GameMessage
+@@ -63,6 +63,7 @@ struct GameMessage
  	GameMessageType type;
  	std::vector<GameCommand> commands;
  	entity_id_t observerEntity = INVALID_ENTITY;
 +	u32 turns = 1;
- };
- 
- struct SetupError : std::exception
-@@ -115,7 +116,7 @@ private:
+ 	// Observer view half-width in metres; 0 keeps the entity's vision range.
+ 	float observerRange = 0.0f;
+ 	// Optional camera focus point in metres; falls back to the entity.
+@@ -119,7 +120,7 @@ private:
  	 * Process commands, update the simulation by one turn.
  	 * @return the gamestate after processing commands.
  	 */

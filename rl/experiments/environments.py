@@ -182,6 +182,8 @@ _TEAM_GATHER_PARAMETERS = frozenset(
         "uri",
         "villager_count",
         "resource_count",
+        "action_mode",
+        "randomize_layout",
         "map_size_m",
         "horizon",
         "sim_steps_per_action",
@@ -190,16 +192,19 @@ _TEAM_GATHER_PARAMETERS = frozenset(
         "stock_resource",
         "stock_player",
         "stock_success_threshold",
-        "min_delivery_per_villager",
         "carried_resource_observation_scale",
         "stock_observation_scale",
         "resource_amount_scale",
         "distance_shaping_scale",
         "carried_resource_delta_reward_scale",
         "click_gather_cycle_penalty",
+        "carrying_no_click_reward",
         "backend_retries",
         "backend_retry_delay",
         "save_replay",
+        "observer_view",
+        "observer_view_margin_m",
+        "observer_villager_slot",
     }
 )
 
@@ -229,6 +234,42 @@ def _validate_team_gather_parameters(
         )
     if "map_size_m" in parameters:
         _validate_positive_number("map_size_m", parameters["map_size_m"], 1_000_000)
+    if "carrying_no_click_reward" in parameters:
+        _validate_non_negative_number(
+            "carrying_no_click_reward",
+            parameters["carrying_no_click_reward"],
+            1_000.0,
+        )
+    if "action_mode" in parameters and parameters["action_mode"] not in {
+        "raw_click",
+        "assignment_click",
+        "joint_assignment_click",
+    }:
+        raise EnvironmentConfigError(
+            "action_mode must be 'raw_click', 'assignment_click', or "
+            "'joint_assignment_click'"
+        )
+    if "randomize_layout" in parameters and not isinstance(
+        parameters["randomize_layout"], bool
+    ):
+        raise EnvironmentConfigError("randomize_layout must be a boolean")
+    if "observer_view" in parameters and parameters["observer_view"] not in {
+        "team",
+        "villager",
+    }:
+        raise EnvironmentConfigError("observer_view must be 'team' or 'villager'")
+    if "observer_view_margin_m" in parameters:
+        _validate_non_negative_number(
+            "observer_view_margin_m",
+            parameters["observer_view_margin_m"],
+            512.0,
+        )
+    if "observer_villager_slot" in parameters:
+        _validate_non_negative_integer(
+            "observer_villager_slot",
+            parameters["observer_villager_slot"],
+            63,
+        )
     if "save_replay" in parameters and not isinstance(parameters["save_replay"], bool):
         raise EnvironmentConfigError("save_replay must be a boolean")
 

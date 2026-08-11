@@ -27,3 +27,6 @@ cache/
 htmlcov/
 .pytest_cache/
 .ruff_cache/
+
+# Rollout videos (large binaries; regenerate with rl.eval --record-sim-turns)
+media/videos/

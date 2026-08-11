@@ -1,28 +1,36 @@
 Engine.LoadLibrary("rmgen");
 Engine.LoadLibrary("rmgen-common");
 
-// Mapa minimo y DETERMINISTA para M2: 4 aldeanos + 4 arboles + 1 deposito, sin RNG.
+// M2: a seeded rotation of six scarce trees around one shared dropsite.
 export function* generateMap()
 {
 	const tGrass = "medit_grass_field";
 	globalThis.g_Map = new RandomMap(0, tGrass);
 
-	const c = g_Map.getCenter();
+	const hutPosition = g_Map.getCenter();
+	const treeCount = 6;
+	// Twelve map tiles is 48 m in this 128-tile scenario: far enough that a
+	// depleted-tree switch costs time, close enough for a five-load episode.
+	const treeRadius = 12;
+	const treeRotation = randFloat(0, 2 * Math.PI);
 
-	// Cuatro aldeanos separados, a la izquierda del centro.
-	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(c.x - 20, c.y - 12), 0);
-	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(c.x - 20, c.y - 4), 0);
-	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(c.x - 20, c.y + 4), 0);
-	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(c.x - 20, c.y + 12), 0);
+	// A compact, symmetric starting formation. It stays fixed while the ring
+	// rotates, so the policy must use geometry rather than memorize a tree slot.
+	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(hutPosition.x - 5, hutPosition.y - 5), 0);
+	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(hutPosition.x - 5, hutPosition.y + 5), 0);
+	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(hutPosition.x + 5, hutPosition.y - 5), 0);
+	g_Map.placeEntityPassable("units/athenai/polites", 1, new Vector2D(hutPosition.x + 5, hutPosition.y + 5), 0);
 
-	// Un unico deposito: obliga a volver al mismo punto con la carga.
-	g_Map.placeEntityPassable("structures/athenai/rl_storehouse", 1, new Vector2D(c.x - 28, c.y + 10), 0);
-
-	// Cuatro arboles separados entre si: existe una asignacion perfecta.
-	g_Map.placeEntityPassable("gaia/tree/oak", 0, new Vector2D(c.x + 20, c.y - 18), 0);
-	g_Map.placeEntityPassable("gaia/tree/oak", 0, new Vector2D(c.x + 20, c.y - 6), 0);
-	g_Map.placeEntityPassable("gaia/tree/oak", 0, new Vector2D(c.x + 20, c.y + 6), 0);
-	g_Map.placeEntityPassable("gaia/tree/oak", 0, new Vector2D(c.x + 20, c.y + 18), 0);
+	// One shared hut and six equal-angle, one-worker M2 trees. Four villagers
+	// must clear an initial wave, then globally assign the freed workers to the
+	// last two trees; a lucky one-shot matching cannot finish the benchmark.
+	g_Map.placeEntityPassable("structures/athenai/rl_storehouse", 1, hutPosition, 0);
+	for (let index = 0; index < treeCount; ++index)
+	{
+		const treeAngle = treeRotation + index * (2 * Math.PI / treeCount);
+		const treePosition = Vector2D.add(hutPosition, new Vector2D(treeRadius, 0).rotate(treeAngle));
+		g_Map.placeEntityPassable("gaia/tree/rl_m2_oak", 0, treePosition, 0);
+	}
 
 	yield 100;
 	return g_Map;

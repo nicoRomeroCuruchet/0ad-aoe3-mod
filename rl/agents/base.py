@@ -14,7 +14,7 @@ from numpy.typing import NDArray
 
 
 Observation = NDArray[np.float32]
-Action = NDArray[np.float32]
+Action = NDArray[Any]
 
 
 def _freeze_value(value: Any) -> Any:

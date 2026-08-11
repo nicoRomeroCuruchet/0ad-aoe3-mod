@@ -68,6 +68,94 @@ index 62716f5..c16ccbf 100755
  		cp -L "${FOLDER}/build-${DEB}/dist/bin/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}" "lib/${LIB_PREFIX}${LIB_NAME}-${DEB}${LIB_SUFFIX}"
  	fi
  fi
+diff --git a/source/graphics/FontManager.h b/source/graphics/FontManager.h
+index 12f90a7..d5b939b 100644
+--- a/source/graphics/FontManager.h
++++ b/source/graphics/FontManager.h
+@@ -18,6 +18,7 @@
+ #ifndef INCLUDED_FONTMANAGER
+ #define INCLUDED_FONTMANAGER
+ 
++#include "graphics/Font.h"
+ #include "lib/code_annotation.h"
+ #include "ps/CStrIntern.h"
+ 
+@@ -28,7 +29,6 @@
+ #include <unordered_map>
+ 
+ class CConfigDBHook;
+-class CFont;
+ struct FT_LibraryRec_;
+ 
+ namespace Renderer::Backend { class IDeviceCommandContext; }
+diff --git a/source/graphics/MapGenerator.cpp b/source/graphics/MapGenerator.cpp
+index 4e7099f..f1011e3 100644
+--- a/source/graphics/MapGenerator.cpp
++++ b/source/graphics/MapGenerator.cpp
+@@ -398,7 +398,7 @@ Script::StructuredClone RunMapGenerationScript(const StopToken stopToken, std::a
+ 	scriptInterface.GetContext().RunJobs();
+ 	auto& future = *compileResult.begin();
+ 	if (!future.IsDone())
+-		throw std::runtime_error{fmt::format("Loading module {:?} takes too long.", script.string8())};
++		throw std::runtime_error{fmt::format("Loading module '{}' takes too long.", script.string8())};
+ 
+ 	JS::RootedObject nsAsObject{rq.cx, future.Get()};
+ 
+@@ -414,7 +414,7 @@ Script::StructuredClone RunMapGenerationScript(const StopToken stopToken, std::a
+ 		if (!hasGenerator)
+ 		{
+ 			throw std::runtime_error{fmt::format(
+-				"The map generation script {:?} didn't export a {:?}.", script.string8(),
++				"The map generation script '{}' didn't export a '{}'.", script.string8(),
+ 				GENERATOR_NAME)};
+ 		}
+ 	}
+diff --git a/source/graphics/TextRenderer.cpp b/source/graphics/TextRenderer.cpp
+index 7ddbcec..3f3bcd4 100644
+--- a/source/graphics/TextRenderer.cpp
++++ b/source/graphics/TextRenderer.cpp
+@@ -217,7 +217,16 @@ void CTextRenderer::Render(
+ 
+ 	// Try to merge non-consecutive batches that share the same font/color/translate:
+ 	// sort the batch list by font, then merge the runs of adjacent compatible batches
+-	m_Batches.sort(SBatchCompare());
++	SBatchCompare compare;
++	for (auto next = m_Batches.begin(); next != m_Batches.end();)
++	{
++		auto current = next++;
++		auto insertion = m_Batches.begin();
++		while (insertion != current && !compare(*current, *insertion))
++			++insertion;
++		if (insertion != current)
++			m_Batches.splice(insertion, m_Batches, current);
++	}
+ 	for (SBatchList::iterator it = m_Batches.begin(); it != m_Batches.end(); )
+ 	{
+ 		SBatchList::iterator next = std::next(it);
+diff --git a/source/ps/GameSetup/HWDetect.cpp b/source/ps/GameSetup/HWDetect.cpp
+index 45911a2..e382bc2 100644
+--- a/source/ps/GameSetup/HWDetect.cpp
++++ b/source/ps/GameSetup/HWDetect.cpp
+@@ -23,7 +23,9 @@
+ #include "lib/debug.h"
+ #include "lib/external_libraries/curl.h"
+ #include "lib/external_libraries/enet.h"
++#if CONFIG2_LOBBY
+ #include "lib/external_libraries/gloox.h"
++#endif
+ #include "lib/external_libraries/png.h"
+ #include "lib/external_libraries/libsdl.h"
+ #include "lib/path.h"
+@@ -209,7 +211,9 @@ void ReportLibraries(const ScriptRequest& rq, JS::HandleValue settings)
+ 	appendLibrary(LibraryReporter{rq, "boost"}.Add("version", BOOST_VERSION).MakeReport());
+ 	appendLibrary(LibraryReporter{rq, "enet"}.Add("version", std::to_string(ENET_VERSION)).MakeReport());
+ 	appendLibrary(LibraryReporter{rq, "fmt"}.Add("version", FMT_VERSION).MakeReport());
++#if CONFIG2_LOBBY
+ 	appendLibrary(LibraryReporter{rq, "gloox"}.Add("version", gloox_version()).MakeReport());
++#endif
+ 	appendLibrary(LibraryReporter{rq, "libicu"}.Add("version", U_ICU_VERSION).MakeReport());
+ 	appendLibrary(LibraryReporter{rq, "libcurl"}.Add("version", std::string(curl_version())).MakeReport());
+ #if CONFIG2_AUDIO
 diff --git a/source/renderer/Renderer.cpp b/source/renderer/Renderer.cpp
 index fd1e2a9..1e0a739 100644
 --- a/source/renderer/Renderer.cpp
@@ -110,10 +198,10 @@ index f218c0f..1c66074 100644
  	void BeginFrame();
  	// signal frame end
 diff --git a/source/rlinterface/RLInterface.cpp b/source/rlinterface/RLInterface.cpp
-index a4328e1..dd08518 100644
+index a4328e1..20b60e3 100644
 --- a/source/rlinterface/RLInterface.cpp
 +++ b/source/rlinterface/RLInterface.cpp
-@@ -21,33 +21,106 @@
+@@ -21,33 +21,162 @@
  
  #include "rlinterface/RLInterface.h"
  
@@ -166,7 +254,7 @@ index a4328e1..dd08518 100644
 +constexpr float OBSERVER_CAMERA_HEIGHT = 512.0f;
 +constexpr float OBSERVER_NEAR_PLANE = 1.0f;
 +constexpr float OBSERVER_FAR_PLANE = 1024.0f;
-+constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v1";
++constexpr const char* OBSERVER_PROTOCOL = "0ad-rl-observer-v3";
 +
 +bool ParseObserverEntity(const char* queryString, entity_id_t& entity)
 +{
@@ -187,6 +275,62 @@ index a4328e1..dd08518 100644
 +		return false;
 +
 +	entity = parsed;
++	return true;
++}
++
++// An optional view half-width in metres. When absent the frame keeps the
++// focused entity's own vision range, which is the per-agent view.
++bool ParseObserverRange(const char* queryString, float& range)
++{
++	range = 0.0f;
++	if (!queryString)
++		return true;
++
++	char value[32]{};
++	const size_t queryLength = strlen(queryString);
++	const int length = mg_get_var(
++		queryString, queryLength, "range", value, sizeof(value));
++	if (length == -1)
++		return true;
++	if (length <= 0 || static_cast<size_t>(length) >= sizeof(value))
++		return false;
++
++	char* end = nullptr;
++	const float parsed = strtof(value, &end);
++	if (end != value + length || !std::isfinite(parsed) ||
++		parsed <= 0.0f || parsed > 512.0f)
++		return false;
++
++	range = parsed;
++	return true;
++}
++
++// An optional focus coordinate in metres. When absent the camera stays on the
++// focused entity itself.
++bool ParseObserverCoordinate(
++	const char* queryString, const char* name, float& coordinate, bool& present)
++{
++	present = false;
++	if (!queryString)
++		return true;
++
++	char value[32]{};
++	const size_t queryLength = strlen(queryString);
++	const int length = mg_get_var(
++		queryString, queryLength, name, value, sizeof(value));
++	if (length == -1)
++		return true;
++	if (length <= 0 || static_cast<size_t>(length) >= sizeof(value))
++		return false;
++
++	char* end = nullptr;
++	const float parsed = strtof(value, &end);
++	if (end != value + length || !std::isfinite(parsed) ||
++		parsed < 0.0f || parsed > 4096.0f)
++		return false;
++
++	coordinate = parsed;
++	present = true;
 +	return true;
 +}
 +
@@ -220,20 +364,28 @@ index a4328e1..dd08518 100644
  namespace RL
  {
  Interface::Interface(const char* server_address)
-@@ -101,6 +172,12 @@ std::string Interface::Evaluate(std::string&& code)
+@@ -101,6 +230,20 @@ std::string Interface::Evaluate(std::string&& code)
  	return SendGameMessage({ GameMessageType::Evaluate });
  }
  
-+std::string Interface::Observe(const entity_id_t entity)
++std::string Interface::Observe(
++	const entity_id_t entity, const float range, const bool hasFocus,
++	const float focusX, const float focusZ)
 +{
 +	std::lock_guard<std::mutex> lock(m_Lock);
-+	return SendGameMessage({GameMessageType::Observe, {}, entity});
++	GameMessage message{GameMessageType::Observe};
++	message.observerEntity = entity;
++	message.observerRange = range;
++	message.observerHasFocus = hasFocus;
++	message.observerFocusX = focusX;
++	message.observerFocusZ = focusZ;
++	return SendGameMessage(std::move(message));
 +}
 +
  std::vector<std::string> Interface::GetTemplates(const std::vector<std::string>& names) const
  {
  	std::lock_guard<std::mutex> lock(m_Lock);
-@@ -146,6 +223,16 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -146,6 +289,16 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  		"Content-Type: text/plain; charset=utf-8\r\n\r\n"
  		"Game not running. Please create a scenario first.";
  
@@ -250,7 +402,7 @@ index a4328e1..dd08518 100644
  	switch (event)
  	{
  	case MG_NEW_REQUEST:
-@@ -261,6 +348,40 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
+@@ -261,6 +414,52 @@ void* Interface::MgCallback(mg_event event, struct mg_connection *conn, const st
  				stream << templateStr.c_str() << "\n";
  
  		}
@@ -267,13 +419,25 @@ index a4328e1..dd08518 100644
 +			}
 +
 +			entity_id_t entity = INVALID_ENTITY;
-+			if (!ParseObserverEntity(request_info->query_string, entity))
++			float range = 0.0f;
++			float focusX = 0.0f;
++			float focusZ = 0.0f;
++			bool hasFocusX = false;
++			bool hasFocusZ = false;
++			if (!ParseObserverEntity(request_info->query_string, entity) ||
++				!ParseObserverRange(request_info->query_string, range) ||
++				!ParseObserverCoordinate(
++					request_info->query_string, "x", focusX, hasFocusX) ||
++				!ParseObserverCoordinate(
++					request_info->query_string, "z", focusZ, hasFocusZ) ||
++				hasFocusX != hasFocusZ)
 +			{
 +				mg_printf(conn, "%s", invalidObserverEntity);
 +				return handled;
 +			}
 +
-+			const std::string frame = interface->Observe(entity);
++			const std::string frame =
++				interface->Observe(entity, range, hasFocusX, focusX, focusZ);
 +			if (frame.empty())
 +			{
 +				mg_printf(conn, "%s", observerUnavailable);
@@ -291,13 +455,15 @@ index a4328e1..dd08518 100644
  		else
  		{
  			mg_printf(conn, "%s", header404);
-@@ -438,11 +559,91 @@ void Interface::ApplyMessage(const GameMessage& msg)
+@@ -438,11 +637,103 @@ void Interface::ApplyMessage(const GameMessage& msg)
  			m_MsgLock.unlock();
  			break;
  		}
 +		case GameMessageType::Observe:
 +		{
-+			m_ReturnValue = RenderObserverFrame(msg.observerEntity);
++			m_ReturnValue = RenderObserverFrame(
++				msg.observerEntity, msg.observerRange, msg.observerHasFocus,
++				msg.observerFocusX, msg.observerFocusZ);
 +			m_MsgApplied.notify_one();
 +			m_MsgLock.unlock();
 +			break;
@@ -307,7 +473,9 @@ index a4328e1..dd08518 100644
  	}
  }
  
-+std::string Interface::RenderObserverFrame(const entity_id_t entity) const
++std::string Interface::RenderObserverFrame(
++	const entity_id_t entity, const float range, const bool hasFocus,
++	const float focusX, const float focusZ) const
 +{
 +	if (!g_Game || !g_Game->IsGameStarted() || !g_GUI)
 +		return {};
@@ -326,13 +494,21 @@ index a4328e1..dd08518 100644
 +		cmpOwnership->GetOwner() != g_Game->GetPlayerID())
 +		return {};
 +
-+	const float visionRange = cmpVision->GetRange().ToFloat();
++	// A requested range widens (or narrows) the view; without one the frame
++	// keeps the focused entity's own vision range.
++	const float visionRange =
++		range > 0.0f ? range : cmpVision->GetRange().ToFloat();
 +	if (!(visionRange > 0.0f))
 +		return {};
 +
++	// The camera may focus a requested point instead of the entity itself; the
++	// entity still selects whose line of sight is rendered. Ground height comes
++	// from the entity either way, which is exact on flat scenario terrain.
 +	const CFixedVector3D fixedPosition = cmpPosition->GetPosition();
 +	const CVector3D focus(
-+		fixedPosition.X.ToFloat(), fixedPosition.Y.ToFloat(), fixedPosition.Z.ToFloat());
++		hasFocus ? focusX : fixedPosition.X.ToFloat(),
++		fixedPosition.Y.ToFloat(),
++		hasFocus ? focusZ : fixedPosition.Z.ToFloat());
 +
 +	CCamera observerCamera;
 +	observerCamera.SetViewPort({0, 0, OBSERVER_FRAME_SIZE, OBSERVER_FRAME_SIZE});
@@ -384,7 +560,7 @@ index a4328e1..dd08518 100644
  {
  	const ScriptInterface& scriptInterface = g_Game->GetSimulation2()->GetScriptInterface();
 diff --git a/source/rlinterface/RLInterface.h b/source/rlinterface/RLInterface.h
-index 106a55c..805f0ec 100644
+index 106a55c..05793ee 100644
 --- a/source/rlinterface/RLInterface.h
 +++ b/source/rlinterface/RLInterface.h
 @@ -20,6 +20,7 @@
@@ -403,27 +579,37 @@ index 106a55c..805f0ec 100644
  };
  
  /**
-@@ -60,6 +62,7 @@ struct GameMessage
+@@ -60,6 +62,13 @@ struct GameMessage
  {
  	GameMessageType type;
  	std::vector<GameCommand> commands;
 +	entity_id_t observerEntity = INVALID_ENTITY;
++	// Observer view half-width in metres; 0 keeps the entity's vision range.
++	float observerRange = 0.0f;
++	// Optional camera focus point in metres; falls back to the entity.
++	bool observerHasFocus = false;
++	float observerFocusX = 0.0f;
++	float observerFocusZ = 0.0f;
  };
  
  struct SetupError : std::exception
-@@ -124,6 +127,11 @@ private:
+@@ -124,6 +133,15 @@ private:
  	 */
  	std::string Evaluate(std::string&& code);
  
 +	/**
-+	 * Render a player-LOS frame centered on an owned entity.
++	 * Render a player-LOS frame centered on an owned entity. A positive range
++	 * overrides the view half-width in metres, and an explicit focus point
++	 * recentres the camera while the entity keeps selecting the rendered LOS.
 +	 */
-+	std::string Observe(entity_id_t entity);
++	std::string Observe(
++		entity_id_t entity, float range, bool hasFocus, float focusX,
++		float focusZ);
 +
  	/**
  	 * @return template data for all templates of @param names.
  	 */
-@@ -159,6 +167,12 @@ private:
+@@ -159,6 +177,14 @@ private:
  	 */
  	std::string GetGameState() const;
  
@@ -431,13 +617,28 @@ index 106a55c..805f0ec 100644
 +	 * Render a top-down PPM frame on the main thread without moving the normal
 +	 * game camera.
 +	 */
-+	std::string RenderObserverFrame(entity_id_t entity) const;
++	std::string RenderObserverFrame(
++		entity_id_t entity, float range, bool hasFocus, float focusX,
++		float focusZ) const;
 +
  private:
  	GameMessage m_GameMessage{GameMessageType::None};
  	ScenarioConfig m_ScenarioConfig;
+diff --git a/source/scriptinterface/FunctionWrapper.h b/source/scriptinterface/FunctionWrapper.h
+index 5e39d6a..cb16390 100644
+--- a/source/scriptinterface/FunctionWrapper.h
++++ b/source/scriptinterface/FunctionWrapper.h
+@@ -515,7 +515,7 @@ public:
+ 				flags))
+ 			{
+ 				throw std::runtime_error{fmt::format(
+-					"Failed defining function {:?} on the native scope.", classInfo->name)};
++					"Failed defining function '{}' on the native scope.", classInfo->name)};
+ 			}
+ 			JS::SetReservedSlot(functionObject, StatefullCallbackPrivateSlot::classInfo,
+ 				JS::PrivateValue(classInfo.release()));
 diff --git a/source/scriptinterface/ModuleLoader.h b/source/scriptinterface/ModuleLoader.h
-index 3f7e470d..0cf4edcb 100644
+index 3f7e470..0cf4edc 100644
 --- a/source/scriptinterface/ModuleLoader.h
 +++ b/source/scriptinterface/ModuleLoader.h
 @@ -47,11 +47,30 @@ class ModuleLoader
@@ -497,104 +698,3 @@ index 3f7e470d..0cf4edcb 100644
  /**
   * The future is fulfilled once the evaluation of the module
   * completes.
-diff --git a/source/graphics/FontManager.h b/source/graphics/FontManager.h
-index 12f90a7a..d5b939bd 100644
---- a/source/graphics/FontManager.h
-+++ b/source/graphics/FontManager.h
-@@ -18,6 +18,7 @@
- #ifndef INCLUDED_FONTMANAGER
- #define INCLUDED_FONTMANAGER
- 
-+#include "graphics/Font.h"
- #include "lib/code_annotation.h"
- #include "ps/CStrIntern.h"
- 
-@@ -28,7 +29,6 @@
- #include <unordered_map>
- 
- class CConfigDBHook;
--class CFont;
- struct FT_LibraryRec_;
- 
- namespace Renderer::Backend { class IDeviceCommandContext; }
-diff --git a/source/graphics/MapGenerator.cpp b/source/graphics/MapGenerator.cpp
-index 4e7099f4..f1011e36 100644
---- a/source/graphics/MapGenerator.cpp
-+++ b/source/graphics/MapGenerator.cpp
-@@ -398,7 +398,7 @@ Script::StructuredClone RunMapGenerationScript(const StopToken stopToken, std::a
- 	scriptInterface.GetContext().RunJobs();
- 	auto& future = *compileResult.begin();
- 	if (!future.IsDone())
--		throw std::runtime_error{fmt::format("Loading module {:?} takes too long.", script.string8())};
-+		throw std::runtime_error{fmt::format("Loading module '{}' takes too long.", script.string8())};
- 
- 	JS::RootedObject nsAsObject{rq.cx, future.Get()};
- 
-@@ -414,7 +414,7 @@ Script::StructuredClone RunMapGenerationScript(const StopToken stopToken, std::a
- 		if (!hasGenerator)
- 		{
- 			throw std::runtime_error{fmt::format(
--				"The map generation script {:?} didn't export a {:?}.", script.string8(),
-+				"The map generation script '{}' didn't export a '{}'.", script.string8(),
- 				GENERATOR_NAME)};
- 		}
- 	}
-diff --git a/source/scriptinterface/FunctionWrapper.h b/source/scriptinterface/FunctionWrapper.h
-index 5e39d6a6..cb16390e 100644
---- a/source/scriptinterface/FunctionWrapper.h
-+++ b/source/scriptinterface/FunctionWrapper.h
-@@ -515,7 +515,7 @@ public:
- 				flags))
- 			{
- 				throw std::runtime_error{fmt::format(
--					"Failed defining function {:?} on the native scope.", classInfo->name)};
-+					"Failed defining function '{}' on the native scope.", classInfo->name)};
- 			}
- 			JS::SetReservedSlot(functionObject, StatefullCallbackPrivateSlot::classInfo,
- 				JS::PrivateValue(classInfo.release()));
-diff --git a/source/ps/GameSetup/HWDetect.cpp b/source/ps/GameSetup/HWDetect.cpp
-index 45911a28..e382bc2d 100644
---- a/source/ps/GameSetup/HWDetect.cpp
-+++ b/source/ps/GameSetup/HWDetect.cpp
-@@ -23,7 +23,9 @@
- #include "lib/debug.h"
- #include "lib/external_libraries/curl.h"
- #include "lib/external_libraries/enet.h"
-+#if CONFIG2_LOBBY
- #include "lib/external_libraries/gloox.h"
-+#endif
- #include "lib/external_libraries/png.h"
- #include "lib/external_libraries/libsdl.h"
- #include "lib/path.h"
-@@ -209,7 +211,9 @@ void ReportLibraries(const ScriptRequest& rq, JS::HandleValue settings)
- 	appendLibrary(LibraryReporter{rq, "boost"}.Add("version", BOOST_VERSION).MakeReport());
- 	appendLibrary(LibraryReporter{rq, "enet"}.Add("version", std::to_string(ENET_VERSION)).MakeReport());
- 	appendLibrary(LibraryReporter{rq, "fmt"}.Add("version", FMT_VERSION).MakeReport());
-+#if CONFIG2_LOBBY
- 	appendLibrary(LibraryReporter{rq, "gloox"}.Add("version", gloox_version()).MakeReport());
-+#endif
- 	appendLibrary(LibraryReporter{rq, "libicu"}.Add("version", U_ICU_VERSION).MakeReport());
- 	appendLibrary(LibraryReporter{rq, "libcurl"}.Add("version", std::string(curl_version())).MakeReport());
- #if CONFIG2_AUDIO
-diff --git a/source/graphics/TextRenderer.cpp b/source/graphics/TextRenderer.cpp
-index 7ddbcecd..3f3bcd47 100644
---- a/source/graphics/TextRenderer.cpp
-+++ b/source/graphics/TextRenderer.cpp
-@@ -217,7 +217,16 @@ void CTextRenderer::Render(
- 
- 	// Try to merge non-consecutive batches that share the same font/color/translate:
- 	// sort the batch list by font, then merge the runs of adjacent compatible batches
--	m_Batches.sort(SBatchCompare());
-+	SBatchCompare compare;
-+	for (auto next = m_Batches.begin(); next != m_Batches.end();)
-+	{
-+		auto current = next++;
-+		auto insertion = m_Batches.begin();
-+		while (insertion != current && !compare(*current, *insertion))
-+			++insertion;
-+		if (insertion != current)
-+			m_Batches.splice(insertion, m_Batches, current);
-+	}
- 	for (SBatchList::iterator it = m_Batches.begin(); it != m_Batches.end(); )
- 	{
- 		SBatchList::iterator next = std::next(it);

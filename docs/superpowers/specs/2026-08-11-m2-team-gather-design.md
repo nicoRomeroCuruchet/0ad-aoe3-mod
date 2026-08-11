@@ -1,21 +1,98 @@
 # M2 — Team Gather (4 aldeanos, varios recursos) — Design Spec
 
 **Fecha:** 2026-08-11
-**Estado:** Diseño aprobado — pendiente plan de implementación
+**Estado:** Implementado; contrato vigente de anillo, agotamiento y matching conjunto
 **Rama:** `feature/polites-pov`
 **Precede:** `2026-06-13-rl-gather-loop-design.md` (M0), M1 implementado sobre esa misma arquitectura
 
 ## Objetivo
 
-Escalar el agente de recolección de **1 aldeano a 4**, con **4 árboles** y reward por
-**Δstock colectivo**. Las posiciones siguen siendo conocidas: M2 no es exploración (eso es M3).
+Escalar el agente de recolección de **1 aldeano a 4**, con **6 árboles exclusivos de 100** y
+reward por **Δstock colectivo**. El objetivo vigente es entregar los **600** de madera del anillo.
+Las posiciones siguen siendo conocidas: M2 no es exploración (eso es M3).
 
 Lo nuevo respecto a M1 es **repartir el trabajo**: qué aldeano va a qué árbol. La mecánica de
 recolección en sí ya está resuelta y entrenada en M1, y se reutiliza.
 
+## Contrato vigente — anillo, agotamiento y matching conjunto
+
+La primera versión de M2 era demasiado pequeña: un roble vanilla tiene 200 de madera y admite
+hasta ocho recolectores, por lo que cuatro aldeanos podían ir juntos al mismo árbol y aun así
+alcanzar el objetivo de `+80`. Ese comportamiento no demuestra reparto de trabajo. El contrato
+vigente hace que el reparto sea una restricción real del mundo y de la acción:
+
+- Hay seis `gaia/tree/rl_m2_oak`, cada uno con **100 de madera** y `MaxGatherers = 1`.
+  Entregar **`Δstock colectivo >= 600`** exige agotar y llevar la carga de los seis. No existe
+  ninguna cuota por aldeano: sólo importa el stock del equipo.
+- La cabaña está en el centro. Los seis árboles forman un círculo de radio fijo, separados por
+  `2π/6` (60°). En cada reset el entorno inyecta un seed reproducible que rota el anillo completo.
+  Radio, formación de aldeanos y separación angular no cambian; lo que se aleatoriza es la
+  orientación absoluta. Así no puede memorizarse “el árbol correcto está al norte”.
+- Al agotarse, el engine elimina visualmente el roble. El roster conserva su slot estable con
+  cantidad cero, de modo que no se reordenan ni las observaciones ni el significado de las
+  acciones durante el episodio.
+
+### Acción: una categoría global de 1045 matchings válidos
+
+La acción Gym es `Discrete(1045)`, no cuatro decisiones independientes. Cada índice decodifica a
+un vector conceptual de cuatro categorías, una por aldeano: `0 = NO_CLICK` y `j + 1 = TREE_j`.
+Los valores no nulos deben ser distintos: un árbol no puede ser reclamado por dos aldeanos en la
+misma decisión. Para cuatro aldeanos y seis árboles hay
+`Σ(k=0..4) C(4,k) P(6,k) = 1045` matchings parciales posibles, incluidos los que dejan a alguien en
+silencio.
+
+La categoría se convierte determinísticamente en los cuatro `[x, z, click]` exactos del slot de
+árbol correspondiente y pasa por el mismo intérprete de clicks de mapa que M1. Por eso no es una
+acción “gather” que salte la interfaz. El ejecutor local deriva una máscara sólo de la observación:
+un árbol que alguien corta queda reservado para ese aldeano y los slots agotados no se pueden
+elegir. `NO_CLICK` mientras UnitAI corta o transporta sigue siendo una decisión que PPO debe
+aprender —un click alternativo puede interrumpir el ciclo—; sólo se eliminan combinaciones que el
+mundo ya rechazaría por capacidad.
+
+PPO usa un único categórico sobre los 1045 matchings. El actor construye puntuaciones por pareja
+aldeano/árbol y suma las del matching completo; la normalización global permite representar la
+competencia por un árbol, cosa que cuatro categóricos factorizados no podían hacer bajo simetría.
+El crítico recibe el estado conjunto. No se asigna un árbol oculto a un aldeano en reset:
+`is_current_target` es sólo el historial del último click que eligió la propia política.
+La inicialización es neutral sobre los matchings factibles: la tabla impone la física, pero PPO
+debe descubrir una primera asignación completa y el segundo reparto cuando se liberan aldeanos.
+
+El muestreo y la pérdida de PPO usan el categórico nativo sin cambios. Sólo su decisión
+determinista es jerárquica: primero marginaliza la masa sobre el patrón binario de qué aldeanos
+hacen click, y después elige el matching más probable dentro de ese patrón. Eso impide que el único
+matching global de silencio gane un `argmax` plano frente a muchos matchings productivos compatibles;
+no introduce un árbol asignado ni una acción adicional.
+
+### Observación y criterio
+
+La observación es una matriz de cuatro slices. Cada slice contiene el estado propio del aldeano
+(posición, carga, stock común, depósito y ciclo UnitAI) y, para cada árbol estable, su
+desplazamiento, distancia, cantidad restante e `is_current_target`. Por lo tanto todos los
+árboles y sus posiciones son visibles para la política: M2 sigue siendo un problema de coordinación
+de mapa conocido, no exploración con niebla de guerra. La rotación por seed evita la memorización
+de orientación, no oculta recursos.
+
+El horizonte vigente es 20 decisiones de 80 turnos. El oracle entrega los 600 en unas 20 decisiones;
+el rollout aleatorio no coordinado no alcanza el total dentro de ese margen. El éxito y la parada
+dependen exclusivamente de `Δstock colectivo >= 600`; métricas por aldeano son diagnósticos,
+nunca requisitos. La corrida PPO se valida después del primer rollout de 512 decisiones sobre 20
+orientaciones retenidas y necesita ≥95% de éxito; es una selección por terminación real, no por
+reward estocástico de los rollouts.
+
+Los checkpoints, resultados y videos producidos antes de este contrato —incluidos los de objetivo
+`+80`, layout fijo o acciones factorizadas— son **legacy**. Su espacio de acción y su benchmark no
+son compatibles ni comparables con el M2 vigente; hay que entrenar y renderizar una corrida nueva.
+
+## Archivo: diseño original (no usar como contrato operativo)
+
+> Las secciones restantes preservan el razonamiento previo a la revisión. Referencias a
+> `Box(12,)`, `MultiDiscrete`, objetivo `+80`, árboles vanilla, layouts fijos, cuotas implícitas
+> o transferencia desde M1 son históricas y quedan sustituidas por el contrato anterior y por los
+> TOML `m2_*` versionados.
+
 ## Qué cambia y qué no
 
-| | M1 (hecho) | M2 (este spec) |
+| | M1 (hecho) | M2 (diseño inicial archivado) |
 |---|---|---|
 | Aldeanos | 1 | 4 |
 | Árboles | 1 | 4 |

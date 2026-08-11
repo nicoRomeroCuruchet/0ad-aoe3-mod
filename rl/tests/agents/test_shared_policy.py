@@ -154,15 +154,40 @@ def test_m1_hidden_layer_and_action_head_copy_exactly():
     assert torch.allclose(policy.mlp_extractor.villager_head.bias, m1.action_net.bias)
 
 
-def test_log_std_is_repeated_once_per_villager():
+def test_the_transfer_leaves_the_configured_exploration_spread_alone():
     from rl.agents.shared_policy import initialize_from_m1
 
-    policy = _policy(villager_count=4)
+    policy = SharedVillagerActorCriticPolicy(
+        observation_space=spaces.Box(-1.0, 1.0, shape=(4, 31), dtype=np.float32),
+        action_space=spaces.Box(-1.0, 1.0, shape=(12,), dtype=np.float32),
+        lr_schedule=lambda _progress: 3e-4,
+        log_std_init=-3.0,
+    )
 
     initialize_from_m1(policy, "unused", loader=_loader(_FakeM1Policy()))
 
+    # M1's spread was tuned on a three-value action over a 120-step episode.
+    # Copying it here silently overrode the config and reintroduced hundreds of
+    # metres of aiming noise, which is what destroys the transferred skill.
     assert policy.log_std.shape == (12,)
-    assert torch.allclose(policy.log_std, torch.full((12,), -0.5))
+    assert torch.allclose(policy.log_std, torch.full((12,), -3.0))
+
+
+def test_the_click_bit_can_carry_its_own_spread():
+    policy = SharedVillagerActorCriticPolicy(
+        observation_space=spaces.Box(-1.0, 1.0, shape=(4, 31), dtype=np.float32),
+        action_space=spaces.Box(-1.0, 1.0, shape=(12,), dtype=np.float32),
+        lr_schedule=lambda _progress: 3e-4,
+        log_std_init=-3.0,
+        click_log_std_init=-0.7,
+    )
+
+    spread = policy.log_std.detach()
+
+    for villager in range(4):
+        assert spread[3 * villager] == pytest.approx(-3.0)
+        assert spread[3 * villager + 1] == pytest.approx(-3.0)
+        assert spread[3 * villager + 2] == pytest.approx(-0.7)
 
 
 def test_a_warm_started_policy_reproduces_m1_on_the_prefix():
