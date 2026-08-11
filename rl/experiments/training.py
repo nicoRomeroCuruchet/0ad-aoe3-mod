@@ -90,10 +90,14 @@ def train_policy(
             if demo_env is not None:
                 # One paced episode on the visual engine, so the run can be
                 # watched without a renderer attached to headless training.
+                # Pacing every simulation turn rather than every decision keeps the
+                # motion smooth: a decision advances many turns at once, so
+                # pausing between decisions looks like burst, freeze, burst.
+                if check_delay > 0.0 and hasattr(demo_env, "sim_frame_observer"):
+                    demo_env.sim_frame_observer = lambda: time.sleep(check_delay)
+
                 def paced(record: DecisionRecord) -> None:
                     del record
-                    if check_delay > 0.0:
-                        time.sleep(check_delay)
 
                 try:
                     demo = evaluate(
@@ -116,6 +120,9 @@ def train_policy(
                         f"success={demo.success_rate:.0%}",
                         flush=True,
                     )
+                finally:
+                    if hasattr(demo_env, "sim_frame_observer"):
+                        demo_env.sim_frame_observer = None
             return report.success_rate
 
     request = TrainRequest(

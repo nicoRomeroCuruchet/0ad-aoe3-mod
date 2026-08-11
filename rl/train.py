@@ -158,8 +158,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=_non_negative_float,
         default=0.0,
         help=(
-            "seconds to pause between decisions of the first episode of each "
-            "solve check, so it can be watched in the game window"
+            "seconds to hold each simulation turn of the demo episode; 0.2 is "
+            "0 A.D.'s real-time pace, smaller values fast-forward"
         ),
     )
     parser.add_argument(
