@@ -17,6 +17,7 @@ from gymnasium import spaces
 from .engine_observer import EngineObserverClient, EngineObserverUnavailable
 from .zero_ad_client import BatchedZeroAD
 from .core import (
+    GATHER_LIFECYCLE_OBSERVATION_LABELS,
     GATHER_OBSERVATION_LABELS,
     GATHER_RESOURCE_OBSERVATION_LABELS,
     build_observation,
@@ -92,6 +93,80 @@ def resource_snapshot_expression(
         "} "
         "return { stock, carried }; "
         "})()"
+    )
+
+
+def team_snapshot_expression(
+    player_id: int,
+    villager_ids: tuple[int, ...],
+    resource_ids: tuple[int, ...],
+    resource: str,
+) -> str:
+    """One JS round-trip covering stock, every carried load, and every tree."""
+
+    resource_literal = json.dumps(resource)
+    villagers_literal = json.dumps([int(entity) for entity in villager_ids])
+    resources_literal = json.dumps([int(entity) for entity in resource_ids])
+    return (
+        "(() => { "
+        "const cmpPlayerManager = Engine.QueryInterface(SYSTEM_ENTITY, "
+        "IID_PlayerManager); "
+        f"const playerEntity = cmpPlayerManager.GetPlayerByID({int(player_id)}); "
+        "const cmpPlayer = Engine.QueryInterface(playerEntity, IID_Player); "
+        "const stock = cmpPlayer.GetResourceCounts(); "
+        "const carried = {}; "
+        f"for (const id of {villagers_literal}) {{ "
+        "const cmpGatherer = Engine.QueryInterface(id, IID_ResourceGatherer); "
+        "let total = 0; "
+        "if (cmpGatherer) for (const item of cmpGatherer.GetCarryingStatus()) { "
+        "const itemType = item.type || item.generic || item.resource || ''; "
+        f"if (itemType === {resource_literal} || "
+        f"itemType.split('.')[0] === {resource_literal}) "
+        "total += +(item.amount || 0); "
+        "} "
+        "carried[id] = total; "
+        "} "
+        "const remaining = {}; "
+        f"for (const id of {resources_literal}) {{ "
+        "const cmpSupply = Engine.QueryInterface(id, IID_ResourceSupply); "
+        "remaining[id] = cmpSupply ? +cmpSupply.GetCurrentAmount() : 0; "
+        "} "
+        "return { stock, carried, remaining }; "
+        "})()"
+    )
+
+
+def _entity_values(
+    values: object,
+    entity_ids: tuple[int, ...],
+    label: str,
+) -> tuple[float, ...]:
+    if not isinstance(values, Mapping):
+        raise TypeError(f"team snapshot {label} must be a mapping")
+    ordered = []
+    for entity in entity_ids:
+        value = values.get(str(int(entity)), values.get(int(entity), 0.0))
+        ordered.append(float(value))
+    return tuple(ordered)
+
+
+def parse_team_snapshot(
+    value: object,
+    resource: str,
+    villager_ids: tuple[int, ...],
+    resource_ids: tuple[int, ...],
+) -> tuple[float, tuple[float, ...], tuple[float, ...]]:
+    """Split one batched evaluation into stock, carried loads, and supplies."""
+
+    if not isinstance(value, Mapping):
+        raise TypeError("team snapshot must be a mapping")
+    for key in ("stock", "carried", "remaining"):
+        if key not in value:
+            raise TypeError(f"team snapshot is missing '{key}'")
+    return (
+        _extract_stock(value["stock"], resource),
+        _entity_values(value["carried"], villager_ids, "carried"),
+        _entity_values(value["remaining"], resource_ids, "remaining"),
     )
 
 
@@ -197,6 +272,7 @@ class ZeroADGatherEnv(gym.Env):
         agent_controls_click=None,
         click_action_threshold=None,
         resource_state_observation=False,
+        lifecycle_state_observation=False,
         carried_resource_observation_scale=20.0,
         stock_observation_scale=1000.0,
         distance_shaping_scale=0.0,
@@ -210,6 +286,7 @@ class ZeroADGatherEnv(gym.Env):
         server_command=None,
         server_startup_delay=2.0,
         backend_factory=None,
+        sim_frame_observer=None,
     ):
         # reach_threshold=12: el aldeano no puede pisar el arbol (obstaculo solido);
         # se frena a ~9.5m del centro, asi que "llegar" se cuenta a <12m.
@@ -239,6 +316,16 @@ class ZeroADGatherEnv(gym.Env):
             raise ValueError("click_action_threshold must be finite in [-1, 1]")
         if not isinstance(resource_state_observation, bool):
             raise ValueError("resource_state_observation must be a boolean")
+        if not isinstance(lifecycle_state_observation, bool):
+            raise ValueError("lifecycle_state_observation must be a boolean")
+        if lifecycle_state_observation and not resource_state_observation:
+            raise ValueError(
+                "lifecycle_state_observation requires resource_state_observation"
+            )
+        if lifecycle_state_observation and reward_mode != REWARD_STOCK_DELTA:
+            raise ValueError(
+                "lifecycle_state_observation requires stock_delta reward mode"
+            )
         if (
             isinstance(carried_resource_observation_scale, bool)
             or not isinstance(carried_resource_observation_scale, Real)
@@ -301,6 +388,9 @@ class ZeroADGatherEnv(gym.Env):
             or float(click_gather_cycle_penalty) < 0.0
         ):
             raise ValueError("click_gather_cycle_penalty must be finite and non-negative")
+        if sim_frame_observer is not None and not callable(sim_frame_observer):
+            raise ValueError("sim_frame_observer must be callable or None")
+        self.sim_frame_observer = sim_frame_observer
         self.uri = uri
         self._backend_factory = backend_factory
         self._uses_injected_backend = game is not None and actions is not None
@@ -343,6 +433,7 @@ class ZeroADGatherEnv(gym.Env):
         self.agent_controls_click = resolved_agent_controls_click
         self.click_action_threshold = float(resolved_click_action_threshold)
         self.resource_state_observation = resource_state_observation
+        self.lifecycle_state_observation = lifecycle_state_observation
         self.carried_resource_observation_scale = float(
             carried_resource_observation_scale
         )
@@ -357,11 +448,12 @@ class ZeroADGatherEnv(gym.Env):
         self.click_gather_cycle_penalty = float(click_gather_cycle_penalty)
         self.backend_retries = backend_retries
         self.backend_retry_delay = backend_retry_delay
-        self.observation_labels = (
-            GATHER_RESOURCE_OBSERVATION_LABELS
-            if self.resource_state_observation
-            else GATHER_OBSERVATION_LABELS
-        )
+        if self.lifecycle_state_observation:
+            self.observation_labels = GATHER_LIFECYCLE_OBSERVATION_LABELS
+        elif self.resource_state_observation:
+            self.observation_labels = GATHER_RESOURCE_OBSERVATION_LABELS
+        else:
+            self.observation_labels = GATHER_OBSERVATION_LABELS
         self.observation_space = spaces.Box(
             -1.0,
             1.0,
@@ -447,6 +539,10 @@ class ZeroADGatherEnv(gym.Env):
     def _tracks_carried_resource(self) -> bool:
         return bool(
             self.resource_state_observation
+            or (
+                self.reward_mode == REWARD_STOCK_DELTA
+                and self.distance_shaping_scale
+            )
             or self.carried_resource_delta_reward_scale
             or self.carrying_no_click_reward
         )
@@ -468,6 +564,16 @@ class ZeroADGatherEnv(gym.Env):
             carried_resource = self._carried_resource(villager)
         if resource_stock is None:
             resource_stock = self._resource_stock()
+        dropsite_xz = None
+        gather_cycle_active = None
+        if self.lifecycle_state_observation:
+            dropsite = self._dropsite(self.game.current_state)
+            if dropsite is None:
+                raise RuntimeError(
+                    "lifecycle state observation requires a storehouse"
+                )
+            dropsite_xz = xz(dropsite.position())
+            gather_cycle_active = self._gather_cycle_active
         return build_observation(
             villager_xz,
             resource_xz,
@@ -476,6 +582,8 @@ class ZeroADGatherEnv(gym.Env):
             carried_resource_scale=self.carried_resource_observation_scale,
             resource_stock=resource_stock,
             resource_stock_scale=self.stock_observation_scale,
+            dropsite_xz=dropsite_xz,
+            gather_cycle_active=gather_cycle_active,
         )
 
     def _start_gather_cycle(self) -> None:
@@ -696,10 +804,36 @@ class ZeroADGatherEnv(gym.Env):
         }
 
     def _step_once(self, action):
+        shaping_target = None
+        previous_shaping_distance = self._prev_dist
+        if (
+            self.reward_mode == REWARD_STOCK_DELTA
+            and self.distance_shaping_scale
+            and self._prev_carried_resource > 0.0
+        ):
+            previous_state = self.game.current_state
+            previous_dropsite = self._dropsite(previous_state)
+            if previous_dropsite is None:
+                previous_shaping_distance = None
+            else:
+                previous_villager = self._positions(previous_state)[0]
+                shaping_target = xz(previous_dropsite.position())
+                previous_shaping_distance = distance(
+                    previous_villager,
+                    shaping_target,
+                )
         cmd, command_name, command_info = self._command_for_action(action)
         commands = None if cmd is None else [cmd]
         step_many = getattr(self.game, "step_many", None)
-        if callable(step_many):
+        if self.sim_frame_observer is not None:
+            # Recording wants one frame per simulation turn, so give up the
+            # batched fast path and report every turn as it is simulated.
+            state = self.game.step(commands)
+            self.sim_frame_observer()
+            for _ in range(self.sim_steps_per_action - 1):
+                state = self.game.step()
+                self.sim_frame_observer()
+        elif callable(step_many):
             state = step_many(commands, turns=self.sim_steps_per_action)
         else:
             state = self.game.step(commands)
@@ -741,8 +875,19 @@ class ZeroADGatherEnv(gym.Env):
                 command_info["gather_cycle_active"] = True
                 command_info["gather_cycle_elapsed"] = self._gather_cycle_elapsed
             distance_shaping_reward = (
-                self.distance_shaping_scale
-                * gather_reward(self._prev_dist, cur_dist)
+                0.0
+                if previous_shaping_distance is None
+                else (
+                    self.distance_shaping_scale
+                    * gather_reward(
+                        previous_shaping_distance,
+                        (
+                            cur_dist
+                            if shaping_target is None
+                            else distance(v, shaping_target)
+                        ),
+                    )
+                )
             )
             ready_reward = (
                 self.gather_ready_reward
