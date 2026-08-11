@@ -268,10 +268,13 @@ class ZeroADTeamGatherEnv(gym.Env):
                 self.gather_command_distance,
             )
             if hits_dropsite and not hits_resource:
-                commands.append(self.actions.returnresource([unit], roster.dropsite))
+                commands.append(self._return_resource_command(unit, roster.dropsite))
                 continue
             if hits_resource:
-                if cycles[villager]:
+                # Re-issuing the same gather order is not an interruption: the
+                # villager keeps working the tree it already has. Only pointing
+                # it at a different tree throws away work in progress.
+                if cycles[villager] and targets[villager] != hit_resource:
                     interrupted[villager] = True
                 targets[villager] = hit_resource
                 cycles[villager] = True
@@ -286,6 +289,19 @@ class ZeroADTeamGatherEnv(gym.Env):
         self._target_index = tuple(targets)
         self._cycle_active = tuple(cycles)
         return commands, interrupted
+
+    def _return_resource_command(self, unit: Any, dropsite: Any) -> Any:
+        """Order a deposit, falling back to a raw command for older clients."""
+
+        return_resource = getattr(self.actions, "returnresource", None)
+        if callable(return_resource):
+            return return_resource([unit], dropsite)
+        return {
+            "type": "returnresource",
+            "entities": [unit.id()],
+            "target": dropsite.id(),
+            "queued": False,
+        }
 
     def _gather_command(self, unit: Any, resource: Any) -> Any:
         gather = getattr(self.actions, "gather")

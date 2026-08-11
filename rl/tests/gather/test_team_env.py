@@ -240,3 +240,66 @@ def test_slot_order_survives_a_shuffled_engine_listing():
 
     # Slot 0 is entity 11 regardless of the order the engine listed units in.
     assert ("gather", 11, 21) in actions.calls
+
+
+def test_regathering_the_same_tree_is_not_an_interruption():
+    env, _game, _actions = _env()
+    env.reset()
+    tree_x, tree_z = _target(300.0, 100.0)
+    action = np.array([tree_x, tree_z, 1.0, 0.0, 0.0, -1.0], dtype=np.float32)
+
+    env.step(action)
+    _observation, _reward, _terminated, _truncated, info = env.step(action)
+
+    assert info["click_gather_cycle_penalty"] == pytest.approx(0.0)
+
+
+def test_retargeting_another_tree_mid_cycle_is_an_interruption():
+    env, _game, _actions = _env()
+    env.reset()
+    first_x, first_z = _target(300.0, 100.0)
+    second_x, second_z = _target(400.0, 100.0)
+
+    env.step(np.array([first_x, first_z, 1.0, 0.0, 0.0, -1.0], dtype=np.float32))
+    _observation, _reward, _terminated, _truncated, info = env.step(
+        np.array([second_x, second_z, 1.0, 0.0, 0.0, -1.0], dtype=np.float32)
+    )
+
+    # One of two villagers interrupted, averaged over the team.
+    assert info["click_gather_cycle_penalty"] == pytest.approx(0.5)
+
+
+def test_return_resource_falls_back_when_the_client_lacks_the_action():
+    class ActionsWithoutReturn:
+        def __init__(self):
+            self.calls = []
+
+        def walk(self, units, x, z):
+            self.calls.append(("walk", units[0].id()))
+            return ("walk", units[0].id())
+
+        def gather(self, units, resource):
+            self.calls.append(("gather", units[0].id()))
+            return ("gather", units[0].id())
+
+    game, _actions = _backend()
+    env = ZeroADTeamGatherEnv(
+        "scenario",
+        villager_count=2,
+        resource_count=2,
+        map_size_m=512.0,
+        horizon=3,
+        sim_steps_per_action=1,
+        gather_command_distance=12.0,
+        game=game,
+        actions=ActionsWithoutReturn(),
+    )
+    env.reset()
+    drop_x, drop_z = _target(50.0, 150.0)
+
+    env.step(np.array([drop_x, drop_z, 1.0, 0.0, 0.0, -1.0], dtype=np.float32))
+
+    command = game.step_calls[-1][0][0]
+    assert command["type"] == "returnresource"
+    assert command["entities"] == [11]
+    assert command["target"] == 31
