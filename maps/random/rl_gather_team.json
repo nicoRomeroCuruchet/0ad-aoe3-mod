@@ -1,0 +1,9 @@
+{
+	"settings": {
+		"Name": "RL Gather Team (debug)",
+		"Script": "rl_gather_team.js",
+		"Description": "Escenario minimo de RL para M2: 4 aldeanos + 4 arboles.",
+		"CircularMap": false,
+		"BaseTerrain": ["medit_grass_field"]
+	}
+}

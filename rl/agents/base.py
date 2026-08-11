@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
 from numbers import Real
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol, runtime_checkable
+from typing import Any, Callable, Mapping, Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import NDArray
@@ -53,6 +54,9 @@ class Policy(Protocol):
         """Choose an action without changing the environment."""
 
 
+SolveEvaluator = Callable[[Policy], float]
+
+
 @dataclass(frozen=True, slots=True)
 class AgentSpec:
     """The registered agent name and its implementation-specific parameters."""
@@ -70,6 +74,48 @@ class AgentSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class TrainingOutcome:
+    """Why a training invocation stopped and how much work it completed."""
+
+    stop_reason: str
+    start_num_timesteps: int
+    end_num_timesteps: int
+    steps_this_run: int
+    solve_checks: int = 0
+    last_success_rate: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.stop_reason not in {"solved", "safety_cap", "steps_complete"}:
+            raise ValueError("stop_reason must describe a supported training outcome")
+        for field_name in (
+            "start_num_timesteps",
+            "end_num_timesteps",
+            "steps_this_run",
+            "solve_checks",
+        ):
+            value = getattr(self, field_name)
+            if not _is_integer(value) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if self.end_num_timesteps < self.start_num_timesteps:
+            raise ValueError("end_num_timesteps cannot precede start_num_timesteps")
+        if self.steps_this_run != self.end_num_timesteps - self.start_num_timesteps:
+            raise ValueError("steps_this_run must equal the timestep difference")
+        if self.last_success_rate is not None:
+            if (
+                isinstance(self.last_success_rate, bool)
+                or not isinstance(self.last_success_rate, Real)
+                or not math.isfinite(float(self.last_success_rate))
+                or not 0.0 <= float(self.last_success_rate) <= 1.0
+            ):
+                raise ValueError("last_success_rate must be finite and in [0, 1]")
+            object.__setattr__(
+                self,
+                "last_success_rate",
+                float(self.last_success_rate),
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class TrainRequest:
     """Everything a trainer needs for one bounded training run."""
 
@@ -80,7 +126,13 @@ class TrainRequest:
     log_dir: Path | None = None
     log_interval: int = 1
     best_model_path: Path | None = None
+    checkpoint_path: Path | None = None
     resume_from: Path | None = None
+    solved_window_episodes: int | None = None
+    solved_success_rate: float | None = None
+    solved_min_steps: int = 0
+    solved_check_interval_steps: int | None = None
+    solve_evaluator: SolveEvaluator | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.agent, AgentSpec):
@@ -98,8 +150,53 @@ class TrainRequest:
             Path,
         ):
             raise ValueError("best_model_path must be a pathlib.Path or None")
+        if self.checkpoint_path is not None and not isinstance(
+            self.checkpoint_path,
+            Path,
+        ):
+            raise ValueError("checkpoint_path must be a pathlib.Path or None")
         if self.resume_from is not None and not isinstance(self.resume_from, Path):
             raise ValueError("resume_from must be a pathlib.Path or None")
+        has_window = self.solved_window_episodes is not None
+        has_success_rate = self.solved_success_rate is not None
+        if has_window != has_success_rate:
+            raise ValueError(
+                "solved window and success rate must be configured together"
+            )
+        if has_window and (
+            not _is_integer(self.solved_window_episodes)
+            or self.solved_window_episodes <= 0
+        ):
+            raise ValueError("solved window must be a positive integer")
+        if has_success_rate and (
+            isinstance(self.solved_success_rate, bool)
+            or not isinstance(self.solved_success_rate, Real)
+            or not math.isfinite(float(self.solved_success_rate))
+            or not 0.0 < float(self.solved_success_rate) <= 1.0
+        ):
+            raise ValueError("solved success rate must be finite and in (0, 1]")
+        if not _is_integer(self.solved_min_steps) or self.solved_min_steps < 0:
+            raise ValueError("solved minimum steps must be a non-negative integer")
+        if not has_window and self.solved_min_steps:
+            raise ValueError("solved minimum steps requires solved stopping")
+        if has_window:
+            if (
+                not _is_integer(self.solved_check_interval_steps)
+                or self.solved_check_interval_steps <= 0
+            ):
+                raise ValueError("solved check interval must be a positive integer")
+            if not callable(self.solve_evaluator):
+                raise ValueError("solved stopping requires a callable evaluator")
+        elif self.solved_check_interval_steps is not None:
+            raise ValueError("solved check interval requires solved stopping")
+        elif self.solve_evaluator is not None:
+            raise ValueError("solve evaluator requires solved stopping")
+        if has_success_rate:
+            object.__setattr__(
+                self,
+                "solved_success_rate",
+                float(self.solved_success_rate),
+            )
 
 
 @runtime_checkable

@@ -25,6 +25,10 @@ weight_decay = 0.0
 total_steps = 10000
 seed = 1
 log_interval = 2
+solved_window_episodes = 20
+solved_success_rate = 0.8
+solved_min_steps = 1000
+solved_check_interval_steps = 250
 
 [evaluation]
 episodes = 20
@@ -51,6 +55,10 @@ def test_load_experiment_config_builds_frozen_typed_sections(tmp_path):
     assert config.training.total_steps == 10_000
     assert config.training.seed == 1
     assert config.training.log_interval == 2
+    assert config.training.solved_window_episodes == 20
+    assert config.training.solved_success_rate == 0.8
+    assert config.training.solved_min_steps == 1_000
+    assert config.training.solved_check_interval_steps == 250
     assert config.evaluation.episodes == 20
     assert config.evaluation.deterministic is True
     assert config.evaluation.seed == 1001
@@ -86,7 +94,41 @@ def test_load_experiment_config_requires_every_section(tmp_path):
         ("total_steps = 10000", "total_steps = 0", "training.total_steps"),
         ("seed = 1", "seed = -1", "training.seed"),
         ("log_interval = 2", "log_interval = 0", "training.log_interval"),
-        ("episodes = 20", "episodes = 0", "evaluation.episodes"),
+        (
+            "solved_window_episodes = 20",
+            "solved_window_episodes = true",
+            "training.solved_window_episodes",
+        ),
+        (
+            "solved_window_episodes = 20",
+            "solved_window_episodes = 0",
+            "training.solved_window_episodes",
+        ),
+        (
+            "solved_success_rate = 0.8",
+            "solved_success_rate = 0.0",
+            "training.solved_success_rate",
+        ),
+        (
+            "solved_success_rate = 0.8",
+            "solved_success_rate = 1.01",
+            "training.solved_success_rate",
+        ),
+        (
+            "solved_min_steps = 1000",
+            "solved_min_steps = -1",
+            "training.solved_min_steps",
+        ),
+        (
+            "solved_check_interval_steps = 250",
+            "solved_check_interval_steps = 0",
+            "training.solved_check_interval_steps",
+        ),
+        (
+            "[evaluation]\nepisodes = 20",
+            "[evaluation]\nepisodes = 0",
+            "evaluation.episodes",
+        ),
         ("deterministic = true", "deterministic = \"yes\"", "evaluation.deterministic"),
         ("seed = 1001", "seed = -1", "evaluation.seed"),
     ],
@@ -119,3 +161,43 @@ def test_load_experiment_config_defaults_training_log_interval(tmp_path):
     config = load_experiment_config(write_config(tmp_path, text))
 
     assert config.training.log_interval == 1
+
+
+def test_load_experiment_config_preserves_legacy_cap_only_training(tmp_path):
+    text = VALID_CONFIG.replace("solved_window_episodes = 20\n", "")
+    text = text.replace("solved_success_rate = 0.8\n", "")
+    text = text.replace("solved_min_steps = 1000\n", "")
+    text = text.replace("solved_check_interval_steps = 250\n", "")
+
+    config = load_experiment_config(write_config(tmp_path, text))
+
+    assert config.training.solved_window_episodes is None
+    assert config.training.solved_success_rate is None
+    assert config.training.solved_min_steps == 0
+    assert config.training.solved_check_interval_steps is None
+
+
+@pytest.mark.parametrize(
+    "removed",
+    ["solved_window_episodes = 20\n", "solved_success_rate = 0.8\n"],
+)
+def test_load_experiment_config_requires_paired_solved_stopping(tmp_path, removed):
+    text = VALID_CONFIG.replace(removed, "")
+
+    with pytest.raises(ConfigError, match="must be configured together"):
+        load_experiment_config(write_config(tmp_path, text))
+
+
+def test_load_experiment_config_rejects_minimum_steps_without_stopping(tmp_path):
+    text = VALID_CONFIG.replace("solved_window_episodes = 20\n", "")
+    text = text.replace("solved_success_rate = 0.8\n", "")
+
+    with pytest.raises(ConfigError, match="requires solved stopping"):
+        load_experiment_config(write_config(tmp_path, text))
+
+
+def test_load_experiment_config_requires_check_interval_for_stopping(tmp_path):
+    text = VALID_CONFIG.replace("solved_check_interval_steps = 250\n", "")
+
+    with pytest.raises(ConfigError, match="check interval"):
+        load_experiment_config(write_config(tmp_path, text))

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import math
+from numbers import Real
 from pathlib import Path
 from typing import Any, Mapping
 import tomllib
@@ -57,11 +59,63 @@ class TrainingConfig:
     total_steps: int
     seed: int
     log_interval: int = 1
+    solved_window_episodes: int | None = None
+    solved_success_rate: float | None = None
+    solved_min_steps: int = 0
+    solved_check_interval_steps: int | None = None
 
     def __post_init__(self) -> None:
         _require_positive_integer(self.total_steps, "training.total_steps")
         _require_non_negative_integer(self.seed, "training.seed")
         _require_positive_integer(self.log_interval, "training.log_interval")
+        has_window = self.solved_window_episodes is not None
+        has_success_rate = self.solved_success_rate is not None
+        if has_window != has_success_rate:
+            raise ConfigError(
+                "training.solved_window_episodes and "
+                "training.solved_success_rate must be configured together"
+            )
+        if has_window:
+            _require_positive_integer(
+                self.solved_window_episodes,
+                "training.solved_window_episodes",
+            )
+        if has_success_rate and (
+            isinstance(self.solved_success_rate, bool)
+            or not isinstance(self.solved_success_rate, Real)
+            or not math.isfinite(float(self.solved_success_rate))
+            or not 0.0 < float(self.solved_success_rate) <= 1.0
+        ):
+            raise ConfigError(
+                "training.solved_success_rate must be finite and in (0, 1]"
+            )
+        _require_non_negative_integer(
+            self.solved_min_steps,
+            "training.solved_min_steps",
+        )
+        if not has_window and self.solved_min_steps:
+            raise ConfigError(
+                "training.solved_min_steps requires solved stopping"
+            )
+        if has_window:
+            if self.solved_check_interval_steps is None:
+                raise ConfigError(
+                    "training solved stopping requires a check interval"
+                )
+            _require_positive_integer(
+                self.solved_check_interval_steps,
+                "training.solved_check_interval_steps",
+            )
+        elif self.solved_check_interval_steps is not None:
+            raise ConfigError(
+                "training.solved_check_interval_steps requires solved stopping"
+            )
+        if has_success_rate:
+            object.__setattr__(
+                self,
+                "solved_success_rate",
+                float(self.solved_success_rate),
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +197,17 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
     _reject_unknown_keys(
         training_data,
         "training",
-        frozenset({"total_steps", "seed", "log_interval"}),
+        frozenset(
+            {
+                "total_steps",
+                "seed",
+                "log_interval",
+                "solved_window_episodes",
+                "solved_success_rate",
+                "solved_min_steps",
+                "solved_check_interval_steps",
+            }
+        ),
     )
     _reject_unknown_keys(
         evaluation_data,
@@ -168,6 +232,12 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
             total_steps=_require_key(training_data, "training", "total_steps"),
             seed=_require_key(training_data, "training", "seed"),
             log_interval=training_data.get("log_interval", 1),
+            solved_window_episodes=training_data.get("solved_window_episodes"),
+            solved_success_rate=training_data.get("solved_success_rate"),
+            solved_min_steps=training_data.get("solved_min_steps", 0),
+            solved_check_interval_steps=training_data.get(
+                "solved_check_interval_steps"
+            ),
         ),
         evaluation=EvaluationConfig(
             episodes=_require_key(evaluation_data, "evaluation", "episodes"),

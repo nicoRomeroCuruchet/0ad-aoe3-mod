@@ -15,6 +15,7 @@ from rl.gather.agent_view import (
 )
 from rl.gather.engine_observer import EngineObserverFrame
 from rl.gather.core import (
+    GATHER_LIFECYCLE_OBSERVATION_LABELS,
     GATHER_OBSERVATION_LABELS,
     GATHER_RESOURCE_OBSERVATION_LABELS,
     POLITES_VISION_RADIUS_M,
@@ -123,6 +124,28 @@ def test_project_local_observation_accepts_resource_state_features():
     assert scene.normalized_observation[-2:] == pytest.approx((0.5, 0.3))
     assert "carried_wood_norm=0.5" in readout
     assert "stock_wood_norm=0.300000012" in readout
+
+
+def test_project_local_observation_names_lifecycle_state_features():
+    observation = build_observation(
+        (256.0, 256.0),
+        (320.0, 256.0),
+        512.0,
+        carried_resource=20.0,
+        carried_resource_scale=20.0,
+        resource_stock=300.0,
+        resource_stock_scale=1000.0,
+        dropsite_xz=(128.0, 384.0),
+        gather_cycle_active=True,
+    )
+
+    scene = project_local_observation(observation, map_size_m=512.0)
+    readout = format_policy_readout(scene)
+
+    assert scene.observation_labels == GATHER_LIFECYCLE_OBSERVATION_LABELS
+    assert "dropsite_x_norm=-0.5" in readout
+    assert "dropsite_z_norm=0.5" in readout
+    assert "gather_cycle_active=1" in readout
 
 
 def test_physical_status_does_not_leak_out_of_range_distance():

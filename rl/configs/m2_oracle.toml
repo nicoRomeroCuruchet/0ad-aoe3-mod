@@ -1,36 +1,31 @@
 [environment]
-name = "zero_ad_gather"
-scenario = "rl/reset_config.json"
+name = "zero_ad_team_gather"
+scenario = "rl/scenarios/team_reset_config.json"
 uri = "http://localhost:6000"
+villager_count = 4
+resource_count = 4
 map_size_m = 512.0
 horizon = 120
-reach_threshold = 12.0
 sim_steps_per_action = 80
-reward_mode = "stock_delta"
+gather_command_distance = 12.0
+click_action_threshold = 0.0
 stock_resource = "wood"
 stock_player = 1
-stock_success_threshold = 1.0
-gather_command_distance = 12.0
-agent_controls_click = true
-click_action_threshold = 0.0
-resource_state_observation = true
-lifecycle_state_observation = true
+stock_success_threshold = 80.0
 carried_resource_observation_scale = 20.0
 stock_observation_scale = 1000.0
+resource_amount_scale = 200.0
 distance_shaping_scale = 0.02
-gather_ready_reward = 0.0
 carried_resource_delta_reward_scale = 0.2
-gather_cycle_no_click_reward = 0.0
-carrying_no_click_reward = 0.0
 click_gather_cycle_penalty = 1.0
 backend_retries = 2
 backend_retry_delay = 1.0
 
 [agent]
-name = "oracle"
+name = "team_oracle"
 
 [training]
-total_steps = 5000
+total_steps = 1
 seed = 0
 
 [evaluation]

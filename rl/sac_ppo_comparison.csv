@@ -1,0 +1,5 @@
+milestone,algorithm,run_dir,stop_reason,training_steps,solve_checks,last_solve_success_rate,safety_cap_steps,eval_episodes,eval_success_rate,eval_mean_reward,eval_mean_steps,eval_truncations,wall_clock_seconds
+M0,SAC,rl/runs/m0_sb3_sac-20260810T225114901939Z,solved,1256,1,1.0,50000,20,1.0,157.369,9.0,0,108
+M0,PPO,rl/runs/m0_sb3_ppo-20260810T225302460934Z,solved,2560,2,1.0,50000,20,1.0,156.538,9.0,0,51
+M1,SAC,rl/runs/m1_sb3_sac-20260810T225353909581Z,solved,12520,5,1.0,500000,20,1.0,28.344,6.0,0,1067
+M1,PPO,rl/runs/m1_sb3_ppo-20260810T231140947825Z,solved,12800,5,1.0,500000,20,1.0,30.095,6.0,0,300

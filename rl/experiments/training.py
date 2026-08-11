@@ -12,7 +12,7 @@ from rl.agents.base import AgentSpec, Policy, TrainRequest, Trainer
 from rl.agents.registry import build_trainer
 
 from .config import ExperimentConfig
-from .evaluation import DecisionObserver, DecisionRecord
+from .evaluation import DecisionObserver, DecisionRecord, evaluate
 
 
 TrainerBuilder = Callable[[AgentSpec], Trainer]
@@ -60,6 +60,7 @@ def train_policy(
     decision_observer: DecisionObserver | None = None,
     log_dir: Path | None = None,
     best_model_path: Path | None = None,
+    checkpoint_path: Path | None = None,
     resume_from: Path | None = None,
 ) -> Policy:
     """Train the configured agent against an already-created environment."""
@@ -68,6 +69,20 @@ def train_policy(
     training_env = (
         env if decision_observer is None else DecisionObserverEnv(env, decision_observer)
     )
+    solve_evaluator = None
+    if config.training.solved_window_episodes is not None:
+
+        def solve_evaluator(policy: Policy) -> float:
+            report = evaluate(
+                env,
+                policy,
+                episodes=config.training.solved_window_episodes,
+                deterministic=True,
+                seed=config.evaluation.seed,
+                decision_observer=decision_observer,
+            )
+            return report.success_rate
+
     request = TrainRequest(
         env=training_env,
         agent=config.agent,
@@ -76,6 +91,12 @@ def train_policy(
         log_dir=log_dir,
         log_interval=config.training.log_interval,
         best_model_path=best_model_path,
+        checkpoint_path=checkpoint_path,
         resume_from=resume_from,
+        solved_window_episodes=config.training.solved_window_episodes,
+        solved_success_rate=config.training.solved_success_rate,
+        solved_min_steps=config.training.solved_min_steps,
+        solved_check_interval_steps=config.training.solved_check_interval_steps,
+        solve_evaluator=solve_evaluator,
     )
     return trainer.fit(request)

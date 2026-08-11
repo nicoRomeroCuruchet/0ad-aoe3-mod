@@ -17,7 +17,7 @@ from rl.agents.registry import (
     load_policy,
     save_policy,
 )
-from rl.agents.sb3 import SB3Policy, SB3SACTrainer
+from rl.agents.sb3 import SB3Policy, SB3PPOTrainer, SB3SACTrainer
 
 
 class DummyEnv:
@@ -32,16 +32,22 @@ class SavableModel:
     def __init__(self):
         self.saved_to = None
         self.replay_buffer_saved_to = None
+        self.num_timesteps = 9
 
     def save(self, path):
         self.saved_to = path
+        destination = Path(path)
+        if destination.suffix == "":
+            destination = Path(f"{destination}.zip")
+        destination.write_bytes(b"model")
 
     def save_replay_buffer(self, path):
         self.replay_buffer_saved_to = path
+        Path(path).write_bytes(b"replay")
 
 
 def test_registry_lists_explicit_supported_agent_names():
-    assert {"oracle", "random", "sb3_sac"}.issubset(available_agents())
+    assert {"oracle", "random", "sb3_sac", "sb3_ppo"}.issubset(available_agents())
 
 
 def test_registry_builds_seeded_random_and_oracle_policies():
@@ -80,6 +86,13 @@ def test_registry_builds_the_sb3_trainer_without_importing_sb3():
     ensure_can_save(AgentSpec("sb3_sac"))
 
 
+def test_registry_builds_the_ppo_trainer_without_importing_sb3():
+    trainer = build_trainer(AgentSpec("sb3_ppo"))
+
+    assert isinstance(trainer, SB3PPOTrainer)
+    ensure_can_save(AgentSpec("sb3_ppo"))
+
+
 def test_registry_rejects_unsupported_operations():
     with pytest.raises(AgentCapabilityError, match="cannot be trained"):
         build_trainer(AgentSpec("oracle"))
@@ -98,7 +111,7 @@ def test_registry_reports_unknown_agents_and_available_choices():
     with pytest.raises(UnknownAgentError, match="available agents") as error:
         build_trainer(AgentSpec("typo"))
 
-    for starter_agent in ("oracle", "random", "sb3_sac"):
+    for starter_agent in ("oracle", "random", "sb3_sac", "sb3_ppo"):
         assert starter_agent in str(error.value)
 
 
@@ -108,10 +121,9 @@ def test_registry_saves_sb3_policy_through_its_registered_serializer(tmp_path: P
 
     save_policy(AgentSpec("sb3_sac"), policy, tmp_path / "model")
 
-    assert model.saved_to == str(tmp_path / "model")
-    assert model.replay_buffer_saved_to == str(
-        tmp_path / "model.replay_buffer.pkl"
-    )
+    assert (tmp_path / "model.zip").read_bytes() == b"model"
+    assert (tmp_path / "model.replay_buffer.pkl").read_bytes() == b"replay"
+    assert (tmp_path / "model.checkpoint.json").is_file()
 
 
 def test_registry_refuses_to_save_a_policy_with_the_wrong_adapter(tmp_path: Path):

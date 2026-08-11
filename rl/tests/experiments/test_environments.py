@@ -62,6 +62,7 @@ def test_build_environment_forwards_m1_stock_parameters(monkeypatch):
             "agent_controls_click": True,
             "click_action_threshold": 0.0,
             "resource_state_observation": True,
+            "lifecycle_state_observation": True,
             "carried_resource_observation_scale": 20.0,
             "stock_observation_scale": 1000.0,
             "distance_shaping_scale": 0.02,
@@ -96,6 +97,7 @@ def test_build_environment_forwards_m1_stock_parameters(monkeypatch):
                 "gather_cycle_no_click_reward": 0.02,
                 "carrying_no_click_reward": 0.05,
                 "resource_state_observation": True,
+                "lifecycle_state_observation": True,
                 "reward_mode": "stock_delta",
                 "server_command": ["./run_game.sh", "--rl-interface=127.0.0.1:6000"],
                 "server_startup_delay": 0.0,
@@ -190,6 +192,7 @@ def test_gather_environment_allows_an_explicit_remote_server_opt_in(monkeypatch)
         ("agent_controls_click", 1),
         ("click_action_threshold", 1.5),
         ("resource_state_observation", 1),
+        ("lifecycle_state_observation", 1),
         ("carried_resource_observation_scale", 0.0),
         ("stock_observation_scale", 0.0),
         ("distance_shaping_scale", -0.1),
@@ -225,6 +228,35 @@ def test_gather_environment_rejects_unknown_parameters():
     )
 
     with pytest.raises(EnvironmentConfigError, match="horzion"):
+        build_environment(config)
+
+
+@pytest.mark.parametrize(
+    ("parameters", "message"),
+    [
+        (
+            {"lifecycle_state_observation": True},
+            "resource_state_observation",
+        ),
+        (
+            {
+                "resource_state_observation": True,
+                "lifecycle_state_observation": True,
+            },
+            "stock_delta",
+        ),
+    ],
+)
+def test_gather_environment_validates_lifecycle_observation_dependencies(
+    parameters,
+    message,
+):
+    config = EnvironmentConfig(
+        name="zero_ad_gather",
+        parameters={"scenario": "rl/reset_config.json", **parameters},
+    )
+
+    with pytest.raises(EnvironmentConfigError, match=message):
         build_environment(config)
 
 

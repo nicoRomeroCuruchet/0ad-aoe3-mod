@@ -119,7 +119,7 @@ Opciones de `rl.eval`:
 | `--delay 0.5` | pausa (seg) entre decisiones; con `--agent-view`, pausa antes de ejecutar la acción |
 | `--agent-view` | abre el render real del LOS del Polites y audita aparte el input omnisciente de la política |
 | `--verbose` | imprime paso a paso (observación, target, distancia, stock si existe, reward) |
-| `--episodes N` | cuántos episodios correr (la config fija usa 1 para oracle/SAC y 10 para random) |
+| `--episodes N` | cuántos episodios correr (la config fija usa 1 para oracle, 10 para random y 20 para SAC) |
 | `--replay` | guarda un replay por episodio (verlo después en 0 A.D. → menú **Replays**) |
 | `--record-agent-view DIR` | guarda frames PNG del observer y un `index.html` reproducible sin Tk |
 | `--record-agent-view-video FILE.mp4` | codifica esos frames renderizados a MP4 con `ffmpeg` |
@@ -132,17 +132,42 @@ Opciones de `rl.eval`:
 ### Reentrenar (opcional)
 
 ```bash
-make train STEPS=2000
+make train
 # M1: reward por madera real depositada
-make m1-train STEPS=10000
+make m1-train
+# Mismo criterio de parada, algoritmo on-policy:
+make ppo-train
+make m1-ppo-train
 ```
+
+`sb3_ppo` usa exactamente el mismo entorno, seeds, criterio de parada y evaluación final
+que `sb3_sac`; sólo cambia el algoritmo (PPO recolecta rollouts de `n_steps` y no guarda
+replay buffer, así que su checkpoint es sólo `model.zip` + manifiesto). Eso hace que las dos
+corridas sean comparables paso a paso.
+
+Las configs de entrenamiento no dependen sólo de un número fijo de pasos: **el criterio de parada es
+completar la tarea**. El agente (SAC o PPO) entrena por tramos y, después de
+cada tramo elegible, pausa el aprendizaje para evaluar la política determinista sobre 20 episodios
+con seeds fijas. Se detiene cuando al menos 80% terminan por éxito real del entorno. Una truncación
+sin terminación exitosa —por horizonte o una interrupción del backend— cuenta como fallo; si el
+objetivo se alcanza exactamente en el último paso, la terminación exitosa sí cuenta. El reward de
+shaping no puede activar este criterio. M0 chequea cada 1.250 pasos, exige al menos 1.000 pasos de
+vida del modelo y tiene un tope de seguridad de 50.000. M1 chequea cada 2.500, exige 2.500 y tiene
+un tope de 500.000. Esos tres números son idénticos en las configs SAC y PPO del mismo milestone.
+Al terminar, ambos vuelven a correr la evaluación determinista de 20 episodios
+que queda guardada en `metrics.json`. El escenario actual tiene `Seed=0` y no usa RNG: esos 20
+episodios comprueban repetibilidad y estabilidad del backend, no diversidad de mapas.
+
+`STEPS=N` reemplaza sólo ese tope para una corrida de diagnóstico; no desactiva el criterio de
+éxito. Al reanudar, los pasos mínimos usan el contador acumulado del modelo y la política debe
+aprobar un chequeo determinista nuevo en esa corrida.
 
 Para continuar M1 desde un checkpoint propio, usá `MODEL` como origen de reanudación y
 confirmá que confiás en ese archivo:
 
 ```bash
-make m1-train MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/best_model \
-  TRUST_MODEL=1 STEPS=100000
+make m1-train MODEL=rl/runs/REEMPLAZAR_CON_LA_CORRIDA/model \
+  TRUST_MODEL=1
 ```
 
 Cada corrida crea una carpeta ignorada por git en `rl/runs/` con el modelo, la config resuelta,
@@ -152,13 +177,18 @@ marcado como `failed` o `interrupted` en vez de dejar un directorio vacío.
 El modelo se guarda **antes** de la evaluación final: si el server se corta durante esa etapa,
 el entrenamiento largo no se pierde. `--out` no pisa un checkpoint existente salvo que agregues
 `--force`.
-Cada checkpoint SAC incluye un archivo hermano `*.replay_buffer.pkl`; conservá ambos para
-reanudar sin descartar la experiencia acumulada. `TRUST_MODEL=1` cubre los dos archivos
-serializados. Los checkpoints antiguos que sólo tienen el modelo siguen funcionando, pero SAC
-vuelve a llenar un buffer inicial antes de actualizar la red.
+Cada checkpoint SAC incluye un archivo hermano `*.replay_buffer.pkl` y un manifiesto
+`*.checkpoint.json` con checksums y timestep. El modelo y el replay se escriben primero en
+temporales y el manifiesto confirma la pareja sólo después de ambos reemplazos; una escritura
+interrumpida o una pareja mezclada se rechaza al reanudar. Conservá los tres archivos para no
+descartar la experiencia acumulada. `TRUST_MODEL=1` cubre los archivos serializados. Los
+checkpoints antiguos sin manifiesto siguen aceptándose; si sólo tienen el modelo, SAC vuelve a
+llenar un buffer inicial antes de actualizar la red.
 Mientras entrena SAC, también guarda `best_model` cuando mejora el reward medio del siguiente
 bloque de 10 episodios terminados. Esto evita elegir un outlier y reduce escrituras síncronas;
-usá ese checkpoint para inspeccionar la mejor política encontrada aunque el run siga abierto.
+usá ese checkpoint para inspeccionar el reward, no como prueba de que el entorno está resuelto.
+El criterio de parada mira terminaciones exitosas y el `model` final conserva exactamente el
+estado que alcanzó el criterio (o el tope de seguridad).
 
 El entrenamiento imprime la carpeta de la corrida **antes** de empezar y SB3 escribe métricas en
 `training/progress.csv` y `training/progress.json` dentro de esa carpeta. Para seguirlo en vivo:
@@ -209,7 +239,7 @@ Con `--mode both --verbose`:
 | `agents/base.py` | Contratos mínimos `Policy`/`Trainer` y resultados inmutables |
 | `agents/registry.py` | Registro explícito de implementaciones y capacidades |
 | `agents/baselines.py` | Políticas random y oracle para validar/comparar |
-| `agents/sb3.py` | Adaptador de SAC de Stable-Baselines3; import opcional y tardío |
+| `agents/sb3.py` | Adaptadores de SAC y PPO de Stable-Baselines3; import opcional y tardío |
 | `agents/custom/` | Lugar de las implementaciones de los alumnos |
 | `experiments/` | Config TOML, construcción, entrenamiento, evaluación y artefactos comunes |
 | `configs/` | Experimentos versionados y comparables (`m0_*.toml`, `m1_*.toml`) |
@@ -320,7 +350,10 @@ todo eso (lo tedioso) está resuelto y es **reutilizable**. Ustedes se concentra
 - **Reward:** `reward_mode` en los TOML; `gather_reward()` / `stock_delta_reward()` en
   `gather/core.py`; lectura de stock con `game.evaluate(...)` desde `env.py`.
 - **Observación:** `build_observation()` en `gather/core.py` + `_positions()` en `env.py`.
-  En M1, `resource_state_observation` agrega madera cargada y stock actual normalizados.
+  En M1, `resource_state_observation` agrega madera cargada y stock actual normalizados;
+  `lifecycle_state_observation` suma la posición del depósito y si el ciclo gather/retorno
+  autónomo sigue activo. Esos campos evitan confundir "esperar el depósito automático" con
+  "el retorno fue interrumpido y hay que volver a ordenarlo".
 - **Acción / nº de aldeanos:** `action_space` y `step()` en `gather/env.py`; en M1
   `[target_x, target_z, click_signal]` separa apuntar de clicar.
 - **Escenario (recursos, tamaño, niebla):** `maps/random/rl_gather.js` + `reset_config.json`.

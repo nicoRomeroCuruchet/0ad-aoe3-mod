@@ -78,3 +78,74 @@ def test_gather_oracle_validates_observation_shape():
 def test_gather_oracle_rejects_unsupported_action_sizes():
     with pytest.raises(ValueError, match="action_size"):
         GatherOraclePolicy(action_size=4)
+
+
+def test_team_oracle_sends_empty_villagers_to_their_nearest_free_tree():
+    from rl.agents.baselines import TeamGatherOraclePolicy
+    from rl.gather.observation import (
+        TeamObservationScales,
+        TeamSnapshot,
+        build_team_observation,
+    )
+
+    snapshot = TeamSnapshot(
+        villager_xz=((100.0, 100.0), (200.0, 100.0)),
+        resource_xz=((300.0, 100.0), (400.0, 100.0)),
+        resource_remaining=(200.0, 200.0),
+        carried=(0.0, 0.0),
+        target_index=(0, 1),
+        gather_cycle_active=(False, False),
+        dropsite_xz=(50.0, 150.0),
+        stock=0.0,
+    )
+    observation = build_team_observation(
+        snapshot,
+        TeamObservationScales(
+            map_size_m=512.0,
+            carried_resource_scale=20.0,
+            stock_scale=1000.0,
+            resource_amount_scale=200.0,
+        ),
+    )
+
+    action = TeamGatherOraclePolicy(2, 2).act(observation, deterministic=True)
+
+    assert action.shape == (6,)
+    assert action[0] == pytest.approx(2.0 * 300.0 / 512.0 - 1.0, abs=1e-3)
+    assert action[1] == pytest.approx(2.0 * 100.0 / 512.0 - 1.0, abs=1e-3)
+    assert action[2] == pytest.approx(1.0)
+    assert action[3] == pytest.approx(2.0 * 400.0 / 512.0 - 1.0, abs=1e-3)
+
+
+def test_team_oracle_sends_loaded_villagers_to_the_dropsite():
+    from rl.agents.baselines import TeamGatherOraclePolicy
+    from rl.gather.observation import (
+        TeamObservationScales,
+        TeamSnapshot,
+        build_team_observation,
+    )
+
+    snapshot = TeamSnapshot(
+        villager_xz=((100.0, 100.0), (200.0, 100.0)),
+        resource_xz=((300.0, 100.0), (400.0, 100.0)),
+        resource_remaining=(200.0, 200.0),
+        carried=(20.0, 0.0),
+        target_index=(0, 1),
+        gather_cycle_active=(False, False),
+        dropsite_xz=(50.0, 150.0),
+        stock=0.0,
+    )
+    observation = build_team_observation(
+        snapshot,
+        TeamObservationScales(
+            map_size_m=512.0,
+            carried_resource_scale=20.0,
+            stock_scale=1000.0,
+            resource_amount_scale=200.0,
+        ),
+    )
+
+    action = TeamGatherOraclePolicy(2, 2).act(observation, deterministic=True)
+
+    assert action[0] == pytest.approx(2.0 * 50.0 / 512.0 - 1.0, abs=1e-3)
+    assert action[1] == pytest.approx(2.0 * 150.0 / 512.0 - 1.0, abs=1e-3)

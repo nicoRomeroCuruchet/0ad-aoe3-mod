@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import asdict
 import math
 import platform
 from pathlib import Path
@@ -74,6 +75,12 @@ def apply_overrides(
             seed=config.training.seed,
             log_interval=(
                 config.training.log_interval if log_interval is None else log_interval
+            ),
+            solved_window_episodes=config.training.solved_window_episodes,
+            solved_success_rate=config.training.solved_success_rate,
+            solved_min_steps=config.training.solved_min_steps,
+            solved_check_interval_steps=(
+                config.training.solved_check_interval_steps
             ),
         ),
         evaluation=config.evaluation,
@@ -163,6 +170,13 @@ def _checkpoint_candidates(path: Path) -> tuple[Path, ...]:
     return tuple(sorted(candidates, key=str))
 
 
+def _policy_training_metadata(policy: object) -> dict[str, object]:
+    outcome = getattr(policy, "training_outcome", None)
+    if outcome is None:
+        return {}
+    return {"training_outcome": asdict(outcome)}
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -235,15 +249,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             decision_observer=decision_observer,
             log_dir=artifacts.training_log_dir,
             best_model_path=best_model_path,
+            checkpoint_path=model_path,
             resume_from=args.resume_from,
         )
+        completed_training_metadata = {
+            **metadata,
+            **_policy_training_metadata(policy),
+        }
         model_path.parent.mkdir(parents=True, exist_ok=True)
         save_policy(config.agent, policy, model_path)
         record_run_context(
             artifacts,
             config,
             metadata={
-                **metadata,
+                **completed_training_metadata,
                 "status": "checkpoint_saved",
             },
         )
@@ -261,8 +280,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             artifacts,
             config,
             metadata={
-                **metadata,
+                **completed_training_metadata,
                 "status": "complete",
+                "evaluation_solved": (
+                    None
+                    if config.training.solved_success_rate is None
+                    else report.success_rate
+                    >= config.training.solved_success_rate
+                ),
             },
         )
     except BaseException as error:
@@ -287,6 +312,14 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _close_environment(env)
 
     print(f"modelo: {model_path}")
+    training_outcome = getattr(policy, "training_outcome", None)
+    if training_outcome is not None:
+        print(
+            "entrenamiento: "
+            f"stop_reason={training_outcome.stop_reason} "
+            f"steps={training_outcome.steps_this_run} "
+            f"solve_checks={training_outcome.solve_checks}"
+        )
     print(
         "evaluación: "
         f"reward_medio={report.mean_total_reward:.1f} "

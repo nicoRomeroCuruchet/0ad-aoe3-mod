@@ -121,6 +121,12 @@ def _config_payload(config: ExperimentConfig) -> dict[str, Any]:
             "total_steps": config.training.total_steps,
             "seed": config.training.seed,
             "log_interval": config.training.log_interval,
+            "solved_window_episodes": config.training.solved_window_episodes,
+            "solved_success_rate": config.training.solved_success_rate,
+            "solved_min_steps": config.training.solved_min_steps,
+            "solved_check_interval_steps": (
+                config.training.solved_check_interval_steps
+            ),
         },
         "evaluation": {
             "episodes": config.evaluation.episodes,

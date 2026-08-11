@@ -558,3 +558,73 @@ def test_trusted_model_is_loaded_through_the_registered_adapter(
     assert exit_code == 0
     assert loaded == [("sb3_sac", model_path)]
     assert env.closed is True
+
+
+def test_rollout_recorder_writes_one_frame_per_simulation_turn(tmp_path: Path):
+    class CaptureEnv:
+        def capture_agent_frame(self):
+            return EngineObserverFrame(1, 1, b"P6\n1 1\n255\n\x10\x20\x30")
+
+    recorder = AgentViewRolloutRecorder(tmp_path / "rollout", CaptureEnv())
+
+    for _ in range(3):
+        recorder.observe_sim_turn()
+
+    assert recorder.turn_frame_count == 3
+    frames = sorted(path.name for path in (tmp_path / "rollout/turn_frames").iterdir())
+    assert frames == ["turn00000.png", "turn00001.png", "turn00002.png"]
+    assert (tmp_path / "rollout/turn_frames/turn00000.png").read_bytes().startswith(
+        b"\x89PNG\r\n\x1a\n"
+    )
+
+
+def test_rollout_video_uses_gstreamer_when_ffmpeg_is_missing(
+    tmp_path: Path,
+    monkeypatch,
+):
+    class CaptureEnv:
+        def capture_agent_frame(self):
+            return EngineObserverFrame(1, 1, b"P6\n1 1\n255\n\x10\x20\x30")
+
+    commands = []
+    monkeypatch.setattr(
+        "rl.gather.rollout_recording.shutil.which",
+        lambda name: None if name == "ffmpeg" else "/usr/bin/gst-launch-1.0",
+    )
+    monkeypatch.setattr(
+        "rl.gather.rollout_recording.subprocess.run",
+        lambda command, check: commands.append(command),
+    )
+    recorder = AgentViewRolloutRecorder(tmp_path / "rollout", CaptureEnv())
+    recorder.observe_sim_turn()
+
+    written = recorder.write_video(tmp_path / "rollout.mp4")
+
+    assert written == tmp_path / "rollout.webm"
+    assert commands[0][0] == "/usr/bin/gst-launch-1.0"
+    assert "vp8enc" in commands[0]
+    assert f"location={tmp_path / 'rollout/turn_frames/turn%05d.png'}" in commands[0]
+
+
+def test_rollout_video_prefers_ffmpeg_and_per_turn_frames(tmp_path: Path, monkeypatch):
+    class CaptureEnv:
+        def capture_agent_frame(self):
+            return EngineObserverFrame(1, 1, b"P6\n1 1\n255\n\x10\x20\x30")
+
+    commands = []
+    monkeypatch.setattr(
+        "rl.gather.rollout_recording.shutil.which",
+        lambda name: "/usr/bin/ffmpeg" if name == "ffmpeg" else None,
+    )
+    monkeypatch.setattr(
+        "rl.gather.rollout_recording.subprocess.run",
+        lambda command, check: commands.append(command),
+    )
+    recorder = AgentViewRolloutRecorder(tmp_path / "rollout", CaptureEnv())
+    recorder.observe_sim_turn()
+
+    written = recorder.write_video(tmp_path / "rollout.mp4")
+
+    assert written == tmp_path / "rollout.mp4"
+    assert str(tmp_path / "rollout/turn_frames/*.png") in commands[0]
+    assert "20" in commands[0]

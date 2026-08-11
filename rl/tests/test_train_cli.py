@@ -7,7 +7,7 @@ import pytest
 from gymnasium import spaces
 
 import rl.train as train_cli
-from rl.agents.base import EpisodeResult
+from rl.agents.base import EpisodeResult, TrainingOutcome
 from rl.experiments.evaluation import DecisionRecord, EvaluationReport
 
 
@@ -25,6 +25,10 @@ policy = "MlpPolicy"
 total_steps = 5000
 seed = 3
 log_interval = 2
+solved_window_episodes = 20
+solved_success_rate = 0.8
+solved_min_steps = 1000
+solved_check_interval_steps = 250
 
 [evaluation]
 episodes = 1
@@ -114,6 +118,10 @@ def test_apply_overrides_returns_a_new_validated_config(tmp_path: Path):
     assert updated.environment.parameters["uri"] == "http://example.test:7000"
     assert updated.training.total_steps == 12
     assert updated.training.log_interval == 4
+    assert updated.training.solved_window_episodes == 20
+    assert updated.training.solved_success_rate == 0.8
+    assert updated.training.solved_min_steps == 1_000
+    assert updated.training.solved_check_interval_steps == 250
     assert original.environment.parameters["uri"] == "http://localhost:6000"
     assert original.training.total_steps == 5000
     assert original.training.log_interval == 2
@@ -152,6 +160,7 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
         decision_observer,
         log_dir,
         best_model_path,
+        checkpoint_path,
         resume_from,
     ):
         calls["config"] = config
@@ -159,9 +168,19 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
         calls["training_observer"] = decision_observer
         calls["training_log_dir"] = log_dir
         calls["best_model_path"] = best_model_path
+        calls["checkpoint_path"] = checkpoint_path
         calls["resume_from"] = resume_from
         events.append("train")
-        return ConstantPolicy()
+        policy = ConstantPolicy()
+        policy.training_outcome = TrainingOutcome(
+            stop_reason="solved",
+            start_num_timesteps=0,
+            end_num_timesteps=1_250,
+            steps_this_run=1_250,
+            solve_checks=1,
+            last_success_rate=1.0,
+        )
+        return policy
 
     def fake_save(agent, policy, path):
         calls["saved"] = (agent, policy, Path(path))
@@ -202,6 +221,7 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
     assert calls["saved"][2] == run_directories[0] / "model"
     assert calls["training_log_dir"] == run_directories[0] / "training"
     assert calls["best_model_path"] == run_directories[0] / "best_model"
+    assert calls["checkpoint_path"] == run_directories[0] / "model"
     assert calls["resume_from"] is None
     assert calls["environment"][1] == {"allow_remote": True}
     assert calls["training_observer"] is None
@@ -215,12 +235,24 @@ def test_main_runs_configured_training_records_artifacts_and_closes_env(
     assert resolved["environment"]["uri"] == "http://example.test:7000"
     assert resolved["training"]["total_steps"] == 12
     assert resolved["training"]["log_interval"] == 3
+    assert resolved["training"]["solved_window_episodes"] == 20
+    assert resolved["training"]["solved_success_rate"] == 0.8
+    assert resolved["training"]["solved_min_steps"] == 1_000
+    assert resolved["training"]["solved_check_interval_steps"] == 250
     metadata = json.loads(
         (run_directories[0] / "metadata.json").read_text(encoding="utf-8")
     )
     assert metadata["status"] == "complete"
     assert metadata["training_log_dir"] == str(run_directories[0] / "training")
     assert metadata["best_model_path"] == str(run_directories[0] / "best_model")
+    assert metadata["training_outcome"] == {
+        "end_num_timesteps": 1_250,
+        "last_success_rate": 1.0,
+        "solve_checks": 1,
+        "start_num_timesteps": 0,
+        "steps_this_run": 1_250,
+        "stop_reason": "solved",
+    }
     output = capsys.readouterr().out
     assert "training_logs:" in output
     assert "best_model:" in output
@@ -270,9 +302,11 @@ def test_main_can_resume_training_from_a_trusted_checkpoint(
         decision_observer,
         log_dir,
         best_model_path,
+        checkpoint_path,
         resume_from,
     ):
         del config, selected_env, decision_observer, log_dir, best_model_path
+        del checkpoint_path
         calls["resume_from"] = resume_from
         return ConstantPolicy()
 
@@ -324,6 +358,7 @@ def test_main_saves_the_checkpoint_before_a_failed_post_training_evaluation(
         decision_observer,
         log_dir,
         best_model_path,
+        checkpoint_path,
         resume_from: (events.append("train") or ConstantPolicy()),
     )
     monkeypatch.setattr(
@@ -386,10 +421,11 @@ def test_main_shows_and_paces_training_and_post_training_evaluation(
         decision_observer,
         log_dir,
         best_model_path,
+        checkpoint_path,
         resume_from,
     ):
         del config, selected_env, log_dir
-        del best_model_path, resume_from
+        del best_model_path, checkpoint_path, resume_from
         events.append("train")
         decision_observer(
             DecisionRecord(
@@ -475,6 +511,7 @@ def test_main_closes_the_environment_when_agent_view_close_fails(
         decision_observer,
         log_dir,
         best_model_path,
+        checkpoint_path,
         resume_from: ConstantPolicy(),
     )
     monkeypatch.setattr(train_cli, "save_policy", lambda agent, policy, path: None)
@@ -517,6 +554,7 @@ def test_main_does_not_train_when_agent_view_cannot_open(
         decision_observer,
         log_dir,
         best_model_path,
+        checkpoint_path,
         resume_from: (events.append("train") or ConstantPolicy()),
     )
     monkeypatch.setattr(

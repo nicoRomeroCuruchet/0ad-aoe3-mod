@@ -264,6 +264,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="encode recorded agent-view frames to this MP4 file with ffmpeg",
     )
     parser.add_argument(
+        "--record-sim-turns",
+        action="store_true",
+        help=(
+            "capture one frame per simulation turn instead of per decision; "
+            "needed for smooth rollout video"
+        ),
+    )
+    parser.add_argument(
         "--allow-schematic-recording",
         action="store_true",
         help="fall back to schematic frames if the engine renderer cannot capture",
@@ -288,6 +296,13 @@ def _close_environment(env: object) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.record_sim_turns and (
+        args.record_agent_view is None and args.record_agent_view_video is None
+    ):
+        parser.error(
+            "--record-sim-turns requires --record-agent-view "
+            "or --record-agent-view-video"
+        )
     if args.model is not None and not args.trust_model:
         parser.error(
             "loading an SB3 checkpoint can execute code; pass --trust-model "
@@ -364,18 +379,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                     fallback_to_schematic=args.allow_schematic_recording,
                 )
             )
-            report = evaluate(
-                env,
-                policy,
-                episodes=config.evaluation.episodes,
-                deterministic=deterministic,
-                seed=config.evaluation.seed,
-                decision_observer=_combine_decision_observers(
-                    view_observer,
-                    None if recorder is None else recorder.observe,
-                ),
-                observer=observer,
-            )
+            if args.record_sim_turns and recorder is not None:
+                env.sim_frame_observer = recorder.observe_sim_turn
+            try:
+                report = evaluate(
+                    env,
+                    policy,
+                    episodes=config.evaluation.episodes,
+                    deterministic=deterministic,
+                    seed=config.evaluation.seed,
+                    decision_observer=_combine_decision_observers(
+                        view_observer,
+                        None if recorder is None else recorder.observe,
+                    ),
+                    observer=observer,
+                )
+            finally:
+                if args.record_sim_turns and recorder is not None:
+                    env.sim_frame_observer = None
             _print_report(report, label)
             if recorder is not None:
                 print(f"rollout: {recorder.write_index()}")

@@ -8,8 +8,14 @@ from types import MappingProxyType
 from typing import Any, Callable, Mapping
 
 from .base import AgentSpec, Policy, Trainer
-from .baselines import GatherOraclePolicy, RandomPolicy
-from .sb3 import SB3Policy, SB3SACTrainer, load_sb3_sac_policy
+from .baselines import GatherOraclePolicy, RandomPolicy, TeamGatherOraclePolicy
+from .sb3 import (
+    SB3Policy,
+    SB3PPOTrainer,
+    SB3SACTrainer,
+    load_sb3_ppo_policy,
+    load_sb3_sac_policy,
+)
 
 
 class UnknownAgentError(ValueError):
@@ -61,14 +67,30 @@ def _build_oracle(agent: AgentSpec, env: Any, seed: int) -> Policy:
     return GatherOraclePolicy(action_size=action_size)
 
 
-def _load_sb3(agent: AgentSpec, path: str | Path) -> Policy:
+def _build_team_oracle(agent: AgentSpec, env: Any, seed: int) -> Policy:
+    del seed
+    _require_no_parameters(agent)
+    villager_count = int(getattr(env, "villager_count", 4))
+    resource_count = int(getattr(env, "resource_count", 4))
+    return TeamGatherOraclePolicy(
+        villager_count=villager_count,
+        resource_count=resource_count,
+    )
+
+
+def _load_sb3_sac(agent: AgentSpec, path: str | Path) -> Policy:
     del agent
     return load_sb3_sac_policy(path)
 
 
+def _load_sb3_ppo(agent: AgentSpec, path: str | Path) -> Policy:
+    del agent
+    return load_sb3_ppo_policy(path)
+
+
 def _save_sb3(policy: Policy, path: str | Path) -> None:
     if not isinstance(policy, SB3Policy):
-        raise TypeError("'sb3_sac' serializer requires an SB3Policy")
+        raise TypeError("SB3 serializers require an SB3Policy")
     policy.save(path)
 
 
@@ -76,9 +98,15 @@ _AGENTS: Mapping[str, AgentRegistration] = MappingProxyType(
     {
         "oracle": AgentRegistration(policy_factory=_build_oracle),
         "random": AgentRegistration(policy_factory=_build_random),
+        "team_oracle": AgentRegistration(policy_factory=_build_team_oracle),
+        "sb3_ppo": AgentRegistration(
+            trainer_factory=SB3PPOTrainer,
+            loader=_load_sb3_ppo,
+            saver=_save_sb3,
+        ),
         "sb3_sac": AgentRegistration(
             trainer_factory=SB3SACTrainer,
-            loader=_load_sb3,
+            loader=_load_sb3_sac,
             saver=_save_sb3,
         ),
     }

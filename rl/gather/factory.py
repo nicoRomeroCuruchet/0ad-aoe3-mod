@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .env import ZeroADGatherEnv
+from .team_env import ZeroADTeamGatherEnv
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -60,3 +61,22 @@ def make_gather_env(
     except json.JSONDecodeError as error:
         raise ValueError("scenario must contain valid JSON") from error
     return ZeroADGatherEnv(scenario_config, **env_parameters)
+
+
+def make_team_gather_env(
+    scenario_path: str | PathLike[str], **env_parameters: Any
+) -> ZeroADTeamGatherEnv:
+    """Read a repo-owned scenario config and forward team parameters."""
+
+    validated_path = _validated_scenario_path(scenario_path)
+    scenario_bytes = validated_path.read_bytes()
+    if len(scenario_bytes) > MAX_SCENARIO_BYTES:
+        raise ValueError(
+            f"scenario is too large (maximum {MAX_SCENARIO_BYTES} bytes)",
+        )
+    scenario_config = scenario_bytes.decode("utf-8")
+    try:
+        json.loads(scenario_config)
+    except json.JSONDecodeError as error:
+        raise ValueError("scenario must contain valid JSON") from error
+    return ZeroADTeamGatherEnv(scenario_config, **env_parameters)

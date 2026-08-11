@@ -68,3 +68,79 @@ class GatherOraclePolicy:
             # Third dimension is a generic click/no-click signal in M1.
             action[2] = 1.0
         return action
+
+
+class TeamGatherOraclePolicy:
+    """Greedy assignment ceiling for the M2 team gather environment.
+
+    Empty villagers claim their nearest unclaimed tree; loaded villagers head
+    for the dropsite. It does not learn: it exists to prove the environment's
+    slot ordering, batching, and reward are wired correctly before training.
+    """
+
+    CORE_WIDTH = 11
+    RELATIONAL_WIDTH = 5
+    CARRIED_INDEX = 5
+    DROPSITE_X_INDEX = 7
+    DROPSITE_Z_INDEX = 8
+
+    def __init__(self, villager_count: int = 4, resource_count: int = 4) -> None:
+        if villager_count <= 0 or resource_count <= 0:
+            raise ValueError("team oracle needs positive counts")
+        self._villager_count = villager_count
+        self._resource_count = resource_count
+
+    def _tree_offsets(self, slice_values):
+        offsets = []
+        for resource in range(self._resource_count):
+            base = self.CORE_WIDTH + resource * self.RELATIONAL_WIDTH
+            offsets.append(
+                (
+                    float(slice_values[base]),
+                    float(slice_values[base + 1]),
+                    float(slice_values[base + 2]),
+                )
+            )
+        return offsets
+
+    def act(
+        self,
+        observation: np.ndarray,
+        *,
+        deterministic: bool,
+    ) -> np.ndarray:
+        """Return `[x, z, click]` per villager as one flat action."""
+
+        del deterministic
+        values = np.asarray(observation, dtype=np.float32)
+        expected = (
+            self._villager_count,
+            self.CORE_WIDTH + self.RELATIONAL_WIDTH * self._resource_count,
+        )
+        if values.shape != expected:
+            raise ValueError(f"observation shape {values.shape} != {expected}")
+
+        action = np.zeros(3 * self._villager_count, dtype=np.float32)
+        claimed: set[int] = set()
+        for villager in range(self._villager_count):
+            slice_values = values[villager]
+            base = 3 * villager
+            action[base + 2] = 1.0
+            if slice_values[self.CARRIED_INDEX] > 0.0:
+                action[base] = slice_values[self.DROPSITE_X_INDEX]
+                action[base + 1] = slice_values[self.DROPSITE_Z_INDEX]
+                continue
+            offsets = self._tree_offsets(slice_values)
+            order = sorted(
+                range(self._resource_count),
+                key=lambda resource: offsets[resource][2],
+            )
+            choice = next(
+                (resource for resource in order if resource not in claimed),
+                order[0],
+            )
+            claimed.add(choice)
+            dx, dz, _dist = offsets[choice]
+            action[base] = np.clip(slice_values[0] + 2.0 * dx, -1.0, 1.0)
+            action[base + 1] = np.clip(slice_values[1] + 2.0 * dz, -1.0, 1.0)
+        return action

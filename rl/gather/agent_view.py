@@ -12,6 +12,7 @@ import numpy as np
 from rl.experiments.evaluation import DecisionObserver, DecisionRecord
 
 from .core import (
+    GATHER_LIFECYCLE_OBSERVATION_LABELS,
     GATHER_OBSERVATION_LABELS,
     GATHER_RESOURCE_OBSERVATION_LABELS,
     POLITES_VISION_RADIUS_M,
@@ -90,7 +91,9 @@ def project_local_observation(
         raise ValueError("gather agent view requires at least five values")
     if not np.isfinite(values).all():
         raise ValueError("gather agent view values must be finite")
-    if len(values) == len(GATHER_RESOURCE_OBSERVATION_LABELS):
+    if len(values) == len(GATHER_LIFECYCLE_OBSERVATION_LABELS):
+        labels = GATHER_LIFECYCLE_OBSERVATION_LABELS
+    elif len(values) == len(GATHER_RESOURCE_OBSERVATION_LABELS):
         labels = GATHER_RESOURCE_OBSERVATION_LABELS
     elif len(values) == len(GATHER_OBSERVATION_LABELS):
         labels = GATHER_OBSERVATION_LABELS

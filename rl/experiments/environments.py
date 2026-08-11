@@ -8,7 +8,7 @@ from numbers import Real
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
-from rl.gather.factory import make_gather_env
+from rl.gather.factory import make_gather_env, make_team_gather_env
 
 from .config import EnvironmentConfig
 
@@ -40,6 +40,7 @@ _GATHER_PARAMETERS = frozenset(
         "agent_controls_click",
         "click_action_threshold",
         "resource_state_observation",
+        "lifecycle_state_observation",
         "carried_resource_observation_scale",
         "stock_observation_scale",
         "distance_shaping_scale",
@@ -175,6 +176,62 @@ def _validate_uri(value: Any, *, allow_remote: bool) -> None:
         )
 
 
+_TEAM_GATHER_PARAMETERS = frozenset(
+    {
+        "scenario",
+        "uri",
+        "villager_count",
+        "resource_count",
+        "map_size_m",
+        "horizon",
+        "sim_steps_per_action",
+        "gather_command_distance",
+        "click_action_threshold",
+        "stock_resource",
+        "stock_player",
+        "stock_success_threshold",
+        "carried_resource_observation_scale",
+        "stock_observation_scale",
+        "resource_amount_scale",
+        "distance_shaping_scale",
+        "carried_resource_delta_reward_scale",
+        "click_gather_cycle_penalty",
+        "backend_retries",
+        "backend_retry_delay",
+        "save_replay",
+    }
+)
+
+
+def _validate_team_gather_parameters(
+    parameters: Mapping[str, Any],
+    *,
+    allow_remote: bool,
+) -> None:
+    unknown = parameters.keys() - _TEAM_GATHER_PARAMETERS
+    if unknown:
+        key = sorted(unknown)[0]
+        raise EnvironmentConfigError(f"unknown zero_ad_team_gather parameter '{key}'")
+
+    if "uri" in parameters:
+        _validate_uri(parameters["uri"], allow_remote=allow_remote)
+    for name, maximum in (("villager_count", 64), ("resource_count", 64)):
+        if name in parameters:
+            _validate_positive_integer(name, parameters[name], maximum)
+    if "horizon" in parameters:
+        _validate_positive_integer("horizon", parameters["horizon"], 100_000)
+    if "sim_steps_per_action" in parameters:
+        _validate_positive_integer(
+            "sim_steps_per_action",
+            parameters["sim_steps_per_action"],
+            10_000,
+        )
+    if "map_size_m" in parameters:
+        _validate_positive_number("map_size_m", parameters["map_size_m"], 1_000_000)
+    if "save_replay" in parameters and not isinstance(parameters["save_replay"], bool):
+        raise EnvironmentConfigError("save_replay must be a boolean")
+
+
 def _validate_gather_parameters(
     parameters: Mapping[str, Any],
     *,
@@ -257,6 +314,20 @@ def _validate_gather_parameters(
         bool,
     ):
         raise EnvironmentConfigError("resource_state_observation must be a boolean")
+    if "lifecycle_state_observation" in parameters and not isinstance(
+        parameters["lifecycle_state_observation"],
+        bool,
+    ):
+        raise EnvironmentConfigError("lifecycle_state_observation must be a boolean")
+    if parameters.get("lifecycle_state_observation", False):
+        if not parameters.get("resource_state_observation", False):
+            raise EnvironmentConfigError(
+                "lifecycle_state_observation requires resource_state_observation"
+            )
+        if parameters.get("reward_mode", "distance_delta") != "stock_delta":
+            raise EnvironmentConfigError(
+                "lifecycle_state_observation requires stock_delta reward mode"
+            )
     if "carried_resource_observation_scale" in parameters:
         _validate_positive_number(
             "carried_resource_observation_scale",
@@ -341,17 +412,22 @@ def build_environment(
 ) -> Any:
     """Construct the environment described by a validated config."""
 
-    if config.name != "zero_ad_gather":
+    if config.name not in {"zero_ad_gather", "zero_ad_team_gather"}:
         raise UnknownEnvironmentError(
             f"unknown environment '{config.name}'; available environments: "
-            "zero_ad_gather",
+            "zero_ad_gather, zero_ad_team_gather",
         )
 
     parameters = _thaw(config.parameters)
-    _validate_gather_parameters(parameters, allow_remote=allow_remote)
+    if config.name == "zero_ad_team_gather":
+        _validate_team_gather_parameters(parameters, allow_remote=allow_remote)
+    else:
+        _validate_gather_parameters(parameters, allow_remote=allow_remote)
     scenario = parameters.pop("scenario", None)
     if not isinstance(scenario, str) or not scenario.strip():
         raise EnvironmentConfigError(
-            "zero_ad_gather requires 'scenario' as a non-empty path",
+            f"{config.name} requires 'scenario' as a non-empty path",
         )
+    if config.name == "zero_ad_team_gather":
+        return make_team_gather_env(scenario, **parameters)
     return make_gather_env(scenario, **parameters)

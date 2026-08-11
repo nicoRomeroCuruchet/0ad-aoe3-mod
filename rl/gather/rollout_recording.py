@@ -127,11 +127,16 @@ class AgentViewRolloutRecorder:
         self.capture_retry_delay = capture_retry_delay
         self.fallback_to_schematic = fallback_to_schematic
         self.frames_dir = root / "frames"
+        self.turn_frames_dir = root / "turn_frames"
         self.metadata_path = root / "metadata.jsonl"
         self.index_path = root / "index.html"
         self._records: list[dict[str, Any]] = []
+        self._turn_frames = 0
 
-    def _capture_frame(self, record: DecisionRecord) -> tuple[EngineObserverFrame, str]:
+    def _capture_frame(
+        self,
+        record: DecisionRecord | None,
+    ) -> tuple[EngineObserverFrame, str]:
         capture = getattr(self.env, "capture_agent_frame", None)
         if not callable(capture):
             raise RuntimeError("selected environment cannot capture agent-view frames")
@@ -145,7 +150,7 @@ class AgentViewRolloutRecorder:
                     break
                 if self.capture_retry_delay:
                     time.sleep(self.capture_retry_delay)
-        if self.fallback_to_schematic:
+        if self.fallback_to_schematic and record is not None:
             print(
                 "warning: engine observer frame unavailable; "
                 "recording schematic rollout frame instead",
@@ -181,6 +186,25 @@ class AgentViewRolloutRecorder:
         ) as metadata:
             metadata.write(json.dumps(entry, sort_keys=True))
             metadata.write("\n")
+
+    def observe_sim_turn(self) -> None:
+        """Record one frame per simulation turn for smooth playback.
+
+        Decision frames land every `sim_steps_per_action` turns, which is far
+        too sparse to watch; this sink is what video encoding consumes.
+        """
+
+        frame, _source = self._capture_frame(None)
+        self.turn_frames_dir.mkdir(parents=True, exist_ok=True)
+        frame_path = self.turn_frames_dir / f"turn{self._turn_frames:05d}.png"
+        frame_path.write_bytes(ppm_to_png(frame))
+        self._turn_frames += 1
+
+    @property
+    def turn_frame_count(self) -> int:
+        """How many per-turn frames this recorder has written."""
+
+        return self._turn_frames
 
     def write_index(self) -> Path:
         self.root.mkdir(parents=True, exist_ok=True)
@@ -233,34 +257,83 @@ class AgentViewRolloutRecorder:
         )
         return self.index_path
 
-    def write_video(self, path: Path) -> Path:
-        """Encode recorded PNG frames to MP4 with ffmpeg."""
+    def _video_source(self) -> tuple[Path, str, int]:
+        """Pick the densest recorded frame set and its encoding cadence."""
 
+        if self._turn_frames:
+            # One frame per simulation turn; 0 A.D. runs turns at 200 ms.
+            return self.turn_frames_dir, "turn%05d.png", 20
         if not self._records:
             raise RuntimeError("cannot write a rollout video without recorded frames")
-        ffmpeg = shutil.which("ffmpeg")
-        if ffmpeg is None:
-            raise RuntimeError(
-                "ffmpeg is required to write MP4 rollout videos; "
-                "install it with: sudo apt install ffmpeg"
-            )
+        return self.frames_dir, None, max(1, round(1.0 / self.frame_seconds))
+
+    def write_video(self, path: Path) -> Path:
+        """Encode recorded PNG frames to MP4 with ffmpeg, or WebM without it."""
+
+        frames_dir, pattern, fps = self._video_source()
         path.parent.mkdir(parents=True, exist_ok=True)
-        fps = max(1, round(1.0 / self.frame_seconds))
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is not None:
+            command = [
+                ffmpeg,
+                "-y",
+                "-framerate",
+                str(fps),
+                "-pattern_type",
+                "glob",
+                "-i",
+                str(frames_dir / "*.png"),
+                "-pix_fmt",
+                "yuv420p",
+                str(path),
+            ]
+            subprocess.run(command, check=True)
+            return path
+        return self._write_webm(path, frames_dir, pattern, fps)
+
+    def _write_webm(
+        self,
+        path: Path,
+        frames_dir: Path,
+        pattern: str | None,
+        fps: int,
+    ) -> Path:
+        """Fall back to GStreamer's VP8 encoder when ffmpeg is absent."""
+
+        gst = shutil.which("gst-launch-1.0")
+        if gst is None:
+            raise RuntimeError(
+                "writing rollout videos needs ffmpeg or gst-launch-1.0; install one "
+                "with: sudo apt install ffmpeg"
+            )
+        if pattern is None:
+            raise RuntimeError(
+                "per-decision frames are not numbered consecutively; record with "
+                "--record-sim-turns to encode a video without ffmpeg"
+            )
+        destination = path if path.suffix == ".webm" else path.with_suffix(".webm")
         command = [
-            ffmpeg,
-            "-y",
-            "-framerate",
-            str(fps),
-            "-pattern_type",
-            "glob",
-            "-i",
-            str(self.frames_dir / "*.png"),
-            "-pix_fmt",
-            "yuv420p",
-            str(path),
+            gst,
+            "multifilesrc",
+            f"location={frames_dir / pattern}",
+            "index=0",
+            f"caps=image/png,framerate={fps}/1",
+            "!",
+            "pngdec",
+            "!",
+            "videoconvert",
+            "!",
+            "vp8enc",
+            "deadline=1",
+            "target-bitrate=3000000",
+            "!",
+            "webmmux",
+            "!",
+            "filesink",
+            f"location={destination}",
         ]
         subprocess.run(command, check=True)
-        return path
+        return destination
 
 
 def mode_recording_dir(root: Path, *, deterministic: bool) -> Path:

@@ -8,14 +8,14 @@ reach_threshold = 12.0
 sim_steps_per_action = 10
 
 [agent]
-name = "sb3_sac"
+name = "sb3_ppo"
 policy = "MlpPolicy"
 verbose = 1
-learning_starts = 200
-buffer_size = 50000
-batch_size = 128
-train_freq = 8
-gradient_steps = 8
+n_steps = 256
+batch_size = 64
+n_epochs = 10
+gae_lambda = 0.95
+ent_coef = 0.0
 
 [training]
 total_steps = 50000

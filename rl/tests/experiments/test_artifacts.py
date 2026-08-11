@@ -100,7 +100,15 @@ def test_record_run_serializes_resolved_config_metrics_and_metadata(tmp_path: Pa
             name="sb3_sac",
             parameters={"policy": "MlpPolicy", "net_arch": [64, 64]},
         ),
-        training=TrainingConfig(total_steps=1_000, seed=7, log_interval=3),
+        training=TrainingConfig(
+            total_steps=1_000,
+            seed=7,
+            log_interval=3,
+            solved_window_episodes=20,
+            solved_success_rate=0.8,
+            solved_min_steps=500,
+            solved_check_interval_steps=250,
+        ),
         evaluation=EvaluationConfig(episodes=1, deterministic=True, seed=8),
     )
     report = EvaluationReport(
@@ -138,7 +146,15 @@ def test_record_run_serializes_resolved_config_metrics_and_metadata(tmp_path: Pa
             "scenario": "rl/reset_config.json",
         },
         "evaluation": {"deterministic": True, "episodes": 1, "seed": 8},
-        "training": {"log_interval": 3, "seed": 7, "total_steps": 1_000},
+        "training": {
+            "log_interval": 3,
+            "seed": 7,
+            "solved_min_steps": 500,
+            "solved_check_interval_steps": 250,
+            "solved_success_rate": 0.8,
+            "solved_window_episodes": 20,
+            "total_steps": 1_000,
+        },
     }
     assert json.loads(artifacts.metrics_path.read_text(encoding="utf-8")) == {
         "episodes": [
