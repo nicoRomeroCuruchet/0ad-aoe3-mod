@@ -15,6 +15,13 @@ GATHER_RESOURCE_OBSERVATION_LABELS = (
     "stock_wood_norm",
 )
 
+GATHER_LIFECYCLE_OBSERVATION_LABELS = (
+    *GATHER_RESOURCE_OBSERVATION_LABELS,
+    "dropsite_x_norm",
+    "dropsite_z_norm",
+    "gather_cycle_active",
+)
+
 # Mirrors Vision/Range inherited by units/athenai/polites from the 0 A.D.
 # public template template_unit_support_female_citizen.
 POLITES_VISION_RADIUS_M = 32.0
@@ -58,6 +65,8 @@ def build_observation(
     carried_resource_scale=1.0,
     resource_stock=None,
     resource_stock_scale=1.0,
+    dropsite_xz=None,
+    gather_cycle_active=None,
 ):
     d = distance(villager_xz, resource_xz)
     values = [
@@ -76,6 +85,24 @@ def build_observation(
                 normalize_non_negative(resource_stock, resource_stock_scale),
             ]
         )
+    if dropsite_xz is not None or gather_cycle_active is not None:
+        if dropsite_xz is None or gather_cycle_active is None:
+            raise ValueError(
+                "dropsite_xz and gather_cycle_active must be provided together"
+            )
+        if carried_resource is None or resource_stock is None:
+            raise ValueError(
+                "lifecycle state requires carried_resource and resource_stock"
+            )
+        if not isinstance(gather_cycle_active, (bool, np.bool_)):
+            raise ValueError("gather_cycle_active must be a boolean")
+        values.extend(
+            [
+                normalize_coord(dropsite_xz[0], map_size_m),
+                normalize_coord(dropsite_xz[1], map_size_m),
+                float(gather_cycle_active),
+            ]
+        )
     return np.array(values, dtype=np.float32)
 
 
@@ -89,3 +116,18 @@ def stock_delta_reward(prev_stock, cur_stock):
 
 def is_reached(cur_dist, threshold):
     return bool(cur_dist < threshold)
+
+
+def nearest_index(origin_xz, candidates_xz):
+    """Index of the closest candidate; ties resolve to the lowest index."""
+    candidates = list(candidates_xz)
+    if not candidates:
+        raise ValueError("nearest_index requires at least one candidate")
+    best_index = 0
+    best_distance = distance(origin_xz, candidates[0])
+    for index in range(1, len(candidates)):
+        candidate_distance = distance(origin_xz, candidates[index])
+        if candidate_distance < best_distance:
+            best_index = index
+            best_distance = candidate_distance
+    return best_index
