@@ -621,3 +621,42 @@ def test_main_refuses_to_overwrite_an_existing_checkpoint_without_force(
 
     assert error.value.code == 2
     assert "--force" in capsys.readouterr().err
+
+
+def test_live_view_is_forwarded_only_when_the_flag_is_set(monkeypatch, tmp_path):
+    experiment_path = write_experiment(tmp_path)
+    seen = []
+
+    def fake_train_policy(config, selected_env, **kwargs):
+        seen.append(kwargs)
+        return ConstantPolicy()
+
+    monkeypatch.setattr(train_cli, "build_environment", lambda config, **kw: CloseableEnv())
+    monkeypatch.setattr(train_cli, "train_policy", fake_train_policy)
+    monkeypatch.setattr(train_cli, "save_policy", lambda agent, policy, path: None)
+    monkeypatch.setattr(
+        train_cli,
+        "evaluate",
+        lambda selected_env, policy, **kwargs: completed_report(),
+    )
+
+    train_cli.main(
+        [
+            "--experiment",
+            str(experiment_path),
+            "--run-root",
+            str(tmp_path / "runs"),
+        ]
+    )
+    train_cli.main(
+        [
+            "--experiment",
+            str(experiment_path),
+            "--run-root",
+            str(tmp_path / "runs"),
+            "--live-view",
+        ]
+    )
+
+    assert "live_view" not in seen[0]
+    assert seen[1]["live_view"] is not None

@@ -38,8 +38,8 @@ seed = 0
 log_interval = 1
 solved_window_episodes = 10
 solved_success_rate = 0.8
-solved_min_steps = 5000
-solved_check_interval_steps = 5000
+solved_min_steps = 3000
+solved_check_interval_steps = 3000
 
 [evaluation]
 episodes = 10
