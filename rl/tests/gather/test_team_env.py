@@ -303,3 +303,67 @@ def test_return_resource_falls_back_when_the_client_lacks_the_action():
     assert command["type"] == "returnresource"
     assert command["entities"] == [11]
     assert command["target"] == 31
+
+
+def test_sim_frame_observer_reports_every_simulation_turn():
+    ticks = []
+    game, actions = _backend()
+    env = ZeroADTeamGatherEnv(
+        "scenario",
+        villager_count=2,
+        resource_count=2,
+        map_size_m=512.0,
+        horizon=3,
+        sim_steps_per_action=3,
+        game=game,
+        actions=actions,
+        sim_frame_observer=lambda: ticks.append(len(game.step_calls)),
+    )
+    env.reset()
+
+    env.step(np.zeros(6, dtype=np.float32))
+
+    assert ticks == [1, 2, 3]
+
+
+def test_capture_agent_frame_follows_the_configured_slot():
+    class FakeObserver:
+        def __init__(self):
+            self.captured = []
+
+        def capture(self, entity_id):
+            self.captured.append(entity_id)
+            return "frame"
+
+    observer = FakeObserver()
+    game, actions = _backend()
+    env = ZeroADTeamGatherEnv(
+        "scenario",
+        villager_count=2,
+        resource_count=2,
+        map_size_m=512.0,
+        horizon=3,
+        sim_steps_per_action=1,
+        observer_villager_slot=1,
+        game=game,
+        actions=actions,
+        engine_observer=observer,
+    )
+    env.reset()
+
+    assert env.capture_agent_frame() == "frame"
+    assert observer.captured == [12]
+
+
+def test_observer_slot_must_address_a_configured_villager():
+    game, actions = _backend()
+
+    with pytest.raises(ValueError, match="observer_villager_slot"):
+        ZeroADTeamGatherEnv(
+            "scenario",
+            villager_count=2,
+            resource_count=2,
+            observer_villager_slot=5,
+            game=game,
+            actions=actions,
+        )

@@ -10,6 +10,7 @@ import numpy as np
 from gymnasium import spaces
 
 from .core import denormalize_action, distance, is_reached, nearest_index, xz
+from .engine_observer import EngineObserverClient, EngineObserverUnavailable
 from .env import (
     DROPSITE_TYPE,
     RECOVERABLE_BACKEND_ERRORS,
@@ -58,17 +59,29 @@ class ZeroADTeamGatherEnv(gym.Env):
         backend_retries: int = 0,
         backend_retry_delay: float = 1.0,
         save_replay: bool = False,
+        observer_villager_slot: int = 0,
         game: Any = None,
         actions: Any = None,
+        engine_observer: Any = None,
+        sim_frame_observer: Callable[[], None] | None = None,
         backend_factory: Callable[[str], tuple[Any, Any]] | None = None,
     ) -> None:
         super().__init__()
         if villager_count <= 0 or resource_count <= 0:
             raise ValueError("villager_count and resource_count must be positive")
+        if not 0 <= observer_villager_slot < villager_count:
+            raise ValueError("observer_villager_slot must address a configured villager")
+        if sim_frame_observer is not None and not callable(sim_frame_observer):
+            raise ValueError("sim_frame_observer must be callable or None")
+        self.observer_villager_slot = observer_villager_slot
+        self.sim_frame_observer = sim_frame_observer
         self.uri = uri
         self._backend_factory = backend_factory
         self._uses_injected_backend = game is not None and actions is not None
         self.game, self.actions = _resolve_backend(uri, game, actions, backend_factory)
+        self.engine_observer = (
+            engine_observer if engine_observer is not None else EngineObserverClient(uri)
+        )
         self.scenario_config = scenario_config
         self.save_replay = save_replay
         self.villager_count = villager_count
@@ -322,7 +335,15 @@ class ZeroADTeamGatherEnv(gym.Env):
         commands, interrupted = self._commands(values, self._roster)
         payload = commands or None
         step_many = getattr(self.game, "step_many", None)
-        if callable(step_many):
+        if self.sim_frame_observer is not None:
+            # Recording wants one frame per simulation turn, so give up the
+            # batched fast path and report every turn as it is simulated.
+            state = self.game.step(payload)
+            self.sim_frame_observer()
+            for _ in range(self.sim_steps_per_action - 1):
+                state = self.game.step()
+                self.sim_frame_observer()
+        elif callable(step_many):
             state = step_many(payload, turns=self.sim_steps_per_action)
         else:
             state = self.game.step(payload)
@@ -400,6 +421,23 @@ class ZeroADTeamGatherEnv(gym.Env):
             info = dict(reset_info)
             info["interrupted"] = True
             return observation, 0.0, False, True, info
+
+    def capture_agent_frame(self):
+        """Capture the engine-rendered view centred on one team member."""
+
+        state = getattr(self.game, "current_state", None)
+        if state is None:
+            raise EngineObserverUnavailable(
+                "the engine observer needs a current game state before capture"
+            )
+        roster = self._roster if self._roster is not None else self._roster_for(state)
+        unit = roster.villagers[self.observer_villager_slot]
+        entity_id = getattr(unit, "id", None)
+        if not callable(entity_id):
+            raise EngineObserverUnavailable(
+                "the zero_ad entity does not expose an engine entity ID"
+            )
+        return self.engine_observer.capture(entity_id())
 
     def close(self):
         """Release the backend exactly once."""
